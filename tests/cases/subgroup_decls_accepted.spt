@@ -1,0 +1,24 @@
+; Subgroup capability/execution-mode and the NoAlias/Sret parameter attributes
+; are declared by some devices even when unused; accept them instead of
+; aborting the module.
+; RUN: %spirv2clc --asm --spirv-version=1.4 %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm --spirv-version=1.4 %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability SubgroupDispatch
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k"
+               OpExecutionMode %k SubgroupSize 16
+               OpDecorate %a FuncParamAttr NoAlias
+               OpDecorate %b FuncParamAttr Sret
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+       %p_g_u = OpTypePointer CrossWorkgroup %uint
+       %fnty = OpTypeFunction %void %p_g_u %p_g_u
+          %k = OpFunction %void None %fnty
+          %a = OpFunctionParameter %p_g_u
+          %b = OpFunctionParameter %p_g_u
+        %lbl = OpLabel
+               OpReturn
+               OpFunctionEnd
+; CHECK: kernel

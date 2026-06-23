@@ -106,6 +106,10 @@ bool translator::translate_capabilities() {
     case SpvCapabilityImageBasic:
     case SpvCapabilityLiteralSampler:
     case SpvCapabilityFloat16Buffer:
+    // Declared by some devices (e.g. pocl) but only gates subgroup-dispatch
+    // builtins; harmless to accept for kernels that don't use them (any such
+    // op would still fail explicitly during instruction translation).
+    case SpvCapabilitySubgroupDispatch:
       break;
     case SpvCapabilityFloat16:
       m_src << "#pragma OPENCL EXTENSION cl_khr_fp16 : enable" << std::endl;
@@ -192,6 +196,11 @@ bool translator::translate_execution_modes() {
     }
     case SpvExecutionModeContractionOff:
       m_entry_points_contraction_off.insert(ep);
+      break;
+    // Subgroup-size requirement declared by some devices (e.g. pocl). The
+    // OpenCL 1.2 target has no way to express it; ignore it for kernels that
+    // don't use subgroup operations.
+    case SpvExecutionModeSubgroupSize:
       break;
     default:
       std::cerr << "UNIMPLEMENTED execution mode " << mode << ".\n";
@@ -282,7 +291,14 @@ bool translator::translate_annotations() {
         case SpvFunctionParameterAttributeSext:
           // Integer extension hints for the ABI; nothing to emit.
           break;
+        case SpvFunctionParameterAttributeNoAlias:
+          // Aliasing hint (like `restrict`); safe to ignore.
         case SpvFunctionParameterAttributeNoCapture:
+          break;
+        case SpvFunctionParameterAttributeSret:
+          // Struct-return pointer: informational in LLVM-derived SPIR-V (the
+          // parameter is an ordinary pointer and the body stores through it
+          // explicitly), so no special handling is required.
           break;
         case SpvFunctionParameterAttributeNoWrite:
           m_nowrite_params.insert(target);
