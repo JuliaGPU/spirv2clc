@@ -1,0 +1,26 @@
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+; A kernel-scope local (Workgroup) array variable. Arrays are struct-wrapped
+; and no longer decay to a pointer, so the variable must be materialized as a
+; pointer to local storage (like a function-local OpVariable), otherwise uses
+; such as &lm[i] and (uint local*)lm fail to compile.
+               OpCapability Kernel
+               OpCapability Addresses
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %fn "test"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+     %uint_0 = OpConstant %uint 0
+     %uint_8 = OpConstant %uint 8
+        %arr = OpTypeArray %uint %uint_8
+     %plocal = OpTypePointer Workgroup %arr
+      %puint = OpTypePointer Workgroup %uint
+         %lm = OpVariable %plocal Workgroup
+       %fnty = OpTypeFunction %void
+         %fn = OpFunction %void None %fnty
+        %lbl = OpLabel
+         %e0 = OpInBoundsPtrAccessChain %puint %lm %uint_0 %uint_0
+               OpStore %e0 %uint_0
+               OpReturn
+               OpFunctionEnd
+; CHECK: local arr{{[0-9]+}} {{.*}}_storage; arr{{[0-9]+}} local* {{.*}} = &

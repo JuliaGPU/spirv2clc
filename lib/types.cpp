@@ -486,7 +486,18 @@ bool translator::translate_types_values() {
       auto storage = inst.GetSingleWordOperand(2);
 
       if (storage == SpvStorageClassWorkgroup) {
-        std::string local_var_decl = "local " + src_type_memory_object_declaration(typointeeid, result);
+        // Mirror the function-local OpVariable pattern: declare the storage and
+        // a pointer to it, so var_for() is a pointer. Array types are
+        // struct-wrapped (no array-to-pointer decay), so the variable can't be
+        // used directly as a pointer the way a bare local array used to be.
+        auto storagename =
+            make_valid_identifier(var_for(result) + "_storage");
+        std::string local_var_decl =
+            "local " +
+            src_type_memory_object_declaration(typointeeid, result,
+                                               storagename) +
+            "; " + src_type(rtype) + " " + var_for(result) + " = &" +
+            storagename;
         m_local_variable_decls[result] = local_var_decl;
       } else if (storage == SpvStorageClassUniformConstant) {
         // Check if initializer is a string array and cache it for later use
