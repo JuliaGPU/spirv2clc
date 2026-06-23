@@ -514,13 +514,19 @@ bool translator::translate_types_values() {
           }
         }
 
+        // The SPIR-V id of the variable is a pointer, but OpenCL 1.2 forbids
+        // program-scope pointer variables, so we declare the storage as a value
+        // and make every reference to the variable take its address.
+        auto storagename = make_valid_identifier(var_for(result) + "_storage");
         m_src << "constant "
-              << src_type_memory_object_declaration(typointeeid, result);
+              << src_type_memory_object_declaration(typointeeid, result,
+                                                    storagename);
         if (inst.NumOperands() > 3) {
           auto init = inst.GetSingleWordOperand(3);
           m_src << " = " << var_for(init);
         }
         m_src << ";" << std::endl;
+        m_names[result] = "(&" + storagename + ")";
       } else {
         std::cerr << "UNIMPLEMENTED global variable with storage class "
                   << storage << std::endl;
