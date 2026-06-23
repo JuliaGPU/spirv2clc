@@ -1,0 +1,20 @@
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; A non-char array OpConstantComposite used as a constant-space initializer.
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Linkage
+               OpMemoryModel Physical64 OpenCL
+       %uint = OpTypeInt 32 0
+     %uint_2 = OpConstant %uint 2
+         %c0 = OpConstant %uint 10
+         %c1 = OpConstant %uint 20
+        %arr = OpTypeArray %uint %uint_2
+        %cst = OpConstantComposite %arr %c0 %c1
+     %pconst = OpTypePointer UniformConstant %arr
+          %g = OpVariable %pconst UniformConstant %cst
+       %void = OpTypeVoid
+       %fnty = OpTypeFunction %void
+         %fn = OpFunction %void None %fnty
+        %lbl = OpLabel
+               OpReturn
+               OpFunctionEnd

@@ -324,9 +324,10 @@ bool translator::translate_extended_instruction(const Instruction &inst,
         auto ptr_type = format_type->AsPointer();
         auto pointee_type = ptr_type->pointee_type();
 
-        // When dealing with an array, make sure to pass a pointer
+        // When dealing with an array, make sure to pass a pointer. Arrays are
+        // struct-wrapped, so decay through the 'e' member.
         if (pointee_type->kind() == Type::Kind::kArray) {
-          format_arg = "&" + format_arg + "[0]";
+          format_arg = "&(" + format_arg + "->e[0])";
         }
       }
 

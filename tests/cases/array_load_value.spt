@@ -1,0 +1,26 @@
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+; Loading a whole array by value (the Julia `identity` pattern: bitcast a
+; struct pointer to a pointer-to-array, then OpLoad the array). Bare C arrays
+; are not assignable, so arrays must be struct-wrapped.
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Linkage
+               OpMemoryModel Physical64 OpenCL
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+     %uint_1 = OpConstant %uint 1
+        %arr = OpTypeArray %uint %uint_1
+     %struct = OpTypeStruct %arr
+    %pstruct = OpTypePointer Function %struct
+       %parr = OpTypePointer Function %arr
+       %fnty = OpTypeFunction %void %pstruct
+         %fn = OpFunction %void None %fnty
+      %param = OpFunctionParameter %pstruct
+        %lbl = OpLabel
+         %bc = OpBitcast %parr %param
+         %ld = OpLoad %arr %bc
+               OpReturn
+               OpFunctionEnd
+; CHECK: typedef struct { uint e[1]; }
+; CHECK: = *

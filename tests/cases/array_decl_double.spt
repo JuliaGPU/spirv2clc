@@ -1,5 +1,4 @@
 ; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL2.0 -x cl - -o /dev/null
-; XFAIL: *
 ; SPIR-V
 ; Version: 1.2
 ; Generator: Khronos SPIR-V Tools Assembler; 0

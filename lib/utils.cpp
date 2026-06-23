@@ -41,76 +41,9 @@ uint32_t translator::array_type_get_length(uint32_t tyid) const {
 
 std::string translator::src_var_decl(uint32_t tyid, const std::string &name,
                                      uint32_t val) const {
-  auto ty = type_for(tyid);
-
-  // Arrays (and pointers to arrays) need special handling; they don't have
-  // a valid type name registered because they require special syntax.
-  if (ty->kind() == spvtools::opt::analysis::Type::Kind::kArray) {
-    // Collect all array dimensions by walking through nested arrays
-    std::vector<uint32_t> dimensions;
-    const auto* current_ty = ty;
-
-    while (current_ty->kind() == spvtools::opt::analysis::Type::Kind::kArray) {
-      auto aty = current_ty->AsArray();
-      auto cstmgr = m_ir->get_constant_mgr();
-      auto ecnt = cstmgr->FindDeclaredConstant(aty->LengthId())->GetSignExtendedValue();
-      dimensions.push_back(ecnt);
-      current_ty = aty->element_type();
-    }
-
-    // Get the base element type (non-array)
-    auto base_type_id = type_id_for(current_ty);
-    std::string base_type;
-    if (val != 0) {
-      base_type = src_type_for_value(val);
-    } else {
-      base_type = src_type(base_type_id);
-    }
-
-    // Build the declaration: base_type name[dim1][dim2]...[dimN]
-    std::string result = base_type + " " + name;
-    for (uint32_t dim : dimensions) {
-      result += "[" + std::to_string(dim) + "]";
-    }
-    return result;
-  } else if (ty->kind() == spvtools::opt::analysis::Type::Kind::kPointer) {
-    auto ptr_ty = ty->AsPointer();
-    auto pointee_ty = ptr_ty->pointee_type();
-
-    if (pointee_ty->kind() == spvtools::opt::analysis::Type::Kind::kArray) {
-      // Collect all array dimensions by walking through nested arrays
-      std::vector<uint32_t> dimensions;
-      const auto *current_ty = pointee_ty;
-
-      while (current_ty->kind() ==
-             spvtools::opt::analysis::Type::Kind::kArray) {
-        auto aty = current_ty->AsArray();
-        auto cstmgr = m_ir->get_constant_mgr();
-        auto ecnt = cstmgr->FindDeclaredConstant(aty->LengthId())
-                        ->GetSignExtendedValue();
-        dimensions.push_back(ecnt);
-        current_ty = aty->element_type();
-      }
-
-      // Get the base pointer type (non-array)
-      auto base_type_id = type_id_for(current_ty);
-      auto storage = static_cast<uint32_t>(ptr_ty->storage_class());
-      std::string base_with_storage =
-          src_pointer_type(storage, base_type_id, false);
-
-      // Remove the trailing "*" since we need special pointer-to-array syntax
-      base_with_storage.pop_back();
-
-      // Build the declaration:
-      // base_type storage_qualifier (*name)[dim1][dim2]...[dimN]
-      std::string result = base_with_storage + "(*" + name + ")";
-      for (uint32_t dim : dimensions) {
-        result += "[" + std::to_string(dim) + "]";
-      }
-      return result;
-    }
-  }
-
+  // Array types are struct-wrapped and pointers/pointers-to-arrays all have a
+  // registered flat type name, so a uniform "TYPE name" declaration works for
+  // every type; no per-shape declarator construction is needed.
   if (val != 0) {
     return src_type_for_value(val) + " " + name;
   } else {
@@ -132,7 +65,9 @@ translator::src_access_chain(const std::string &src_base,
     return "&(" + ret + "->m" + std::to_string(idxcst->GetZeroExtendedValue()) +
            ")";
   } else if (ty->kind() == spvtools::opt::analysis::Type::kArray) {
-    return "&(" + ret + "[" + var_for(index) + "])";
+    // Arrays are struct-wrapped; index through the 'e' member. The base is
+    // always a pointer expression here, so dereference with '->'.
+    return "&(" + ret + "->e[" + var_for(index) + "])";
   } else {
     return "UNIMPLEMENTED";
   }
@@ -141,14 +76,9 @@ translator::src_access_chain(const std::string &src_base,
 std::string
 translator::src_type_memory_object_declaration(uint32_t tid, uint32_t val,
                                                const std::string &name) const {
-  std::string ret;
-  if (type_for(tid)->kind() == Type::Kind::kArray) {
-    auto tarray = type_for(tid)->AsArray();
-    auto elemty = tarray->element_type();
-    ret = src_type(type_id_for(elemty));
-  } else {
-    ret = src_type(tid);
-  }
+  // Arrays are struct-wrapped and have a flat type name, so the declaration is
+  // uniform "TYPE qualifiers name" for every type.
+  std::string ret = src_type(tid);
   if (m_restricts.count(val)) {
     ret += " restrict";
   }
@@ -160,10 +90,6 @@ translator::src_type_memory_object_declaration(uint32_t tid, uint32_t val,
            ")))";
   }
   ret += " " + name;
-  if (type_for(tid)->kind() == Type::Kind::kArray) {
-    auto len = array_type_get_length(tid);
-    ret += "[" + std::to_string(len) + "]";
-  }
   return ret;
 }
 
@@ -228,10 +154,17 @@ bool translator::get_null_constant(uint32_t tyid, std::string &src) const {
     break;
   case Type::Kind::kArray:
   case Type::Kind::kStruct:
-    src = "{0}";
+    // Both are emitted as C structs (arrays are struct-wrapped). Use a
+    // compound literal so the value is valid as an rvalue too, not just in
+    // initializer position.
+    src = "((" + src_type(tyid) + "){0})";
     break;
   case Type::Kind::kBool:
     src = "false";
+    break;
+  case Type::Kind::kPointer:
+    // OpenCL 1.2 represents the null pointer as a cast-from-zero.
+    src = src_cast(tyid, "0");
     break;
   case Type::Kind::kVector:
     src = "((" + src_type(tyid) + ")(0))";

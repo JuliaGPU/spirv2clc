@@ -1,15 +1,12 @@
 std::string translator::src_pointer_type(uint32_t storage, uint32_t tyid, bool signedty) const {
+  // Every pointee type (including arrays, which are struct-wrapped) has a flat
+  // type name, so a pointer is just "<pointee> <addrspace>*". A pointer-to-array
+  // becomes a pointer-to-wrapper, which carries the correct element stride.
   std::string typestr;
-  if (type_for(tyid)->kind() == Type::Kind::kArray) {
-    auto tarray = type_for(tyid)->AsArray();
-    auto elemty = tarray->element_type();
-    typestr += src_type(type_id_for(elemty));
+  if (signedty) {
+    typestr += src_type_signed(tyid);
   } else {
-    if (signedty) {
-        typestr += src_type_signed(tyid);
-    } else {
-        typestr += src_type(tyid);
-    }
+    typestr += src_type(tyid);
   }
   typestr += " ";
   switch (storage) {
@@ -437,20 +434,22 @@ bool translator::translate_types_values() {
         break;
       }
       case Type::Kind::kArray: {
-        lit = "{";
-        const char *sep = "";
+        // Array types are wrapped in a struct, so the initializer is
+        // ((arrN){{ e0, e1, ... }}): outer braces for the wrapper, inner for
+        // the element array member 'e'.
         uint32_t num_elems = array_type_get_length(rtype);
         if (num_elems == 0) {
             return false;
         }
-
+        lit = "((" + src_type(rtype) + "){{";
+        const char *sep = "";
         for (uint32_t opidx = 2; opidx < num_elems + 2; opidx++) {
           auto mid = inst.GetSingleWordOperand(opidx);
           lit += sep;
           lit += m_literals[mid];
           sep = ", ";
         }
-        lit += "}";
+        lit += "}})";
         m_literals[result] = lit;
         break;
       }

@@ -275,6 +275,15 @@ bool translator::translate_instruction(const Instruction &inst,
       sval = src_vec_comp(comp, idx);
       break;
     }
+    case Type::Kind::kArray: {
+      // Arrays are struct-wrapped; index through the 'e' member.
+      sval = var_for(comp) + ".e[" + std::to_string(idx) + "]";
+      break;
+    }
+    case Type::Kind::kStruct: {
+      sval = var_for(comp) + ".m" + std::to_string(idx);
+      break;
+    }
     default:
       std::cerr << "UNIMPLEMENTED OpCompositeExtract, type " << type->kind()
                 << std::endl;
@@ -301,6 +310,15 @@ bool translator::translate_instruction(const Instruction &inst,
     case Type::Kind::kVector:
       src += src_vec_comp(result, index) + " = " + var_for(object);
       break;
+    case Type::Kind::kArray:
+      // Arrays are struct-wrapped; index through the 'e' member.
+      src += var_for(result) + ".e[" + std::to_string(index) +
+             "] = " + var_for(object);
+      break;
+    case Type::Kind::kStruct:
+      src += var_for(result) + ".m" + std::to_string(index) + " = " +
+             var_for(object);
+      break;
     default:
       std::cerr << "UNIMPLEMENTED OpCompositeInsert, type " << type->kind()
                 << std::endl;
@@ -309,7 +327,10 @@ bool translator::translate_instruction(const Instruction &inst,
     break;
   }
   case spv::Op::OpCompositeConstruct: {
-    sval = "{";
+    // Arrays are struct-wrapped, so their elements live in the 'e' member and
+    // need an extra brace level: { { e0, e1, ... } }.
+    bool is_array = type_for(rtype)->kind() == Type::Kind::kArray;
+    sval = is_array ? "{{" : "{";
     const char *sep = "";
     for (unsigned i = 2; i < inst.NumOperands(); i++) {
       auto mem = inst.GetSingleWordOperand(i);
@@ -317,7 +338,7 @@ bool translator::translate_instruction(const Instruction &inst,
       sval += var_for(mem);
       sep = ", ";
     }
-    sval += "}";
+    sval += is_array ? "}}" : "}";
     break;
   }
   case spv::Op::OpVectorExtractDynamic: {
