@@ -1,3 +1,4 @@
+# -*- Python -*-
 # Copyright 2020-2022 The spirv2clc authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -11,16 +12,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+#
+# This file is configured by CMake from lit.site.cfg.py.in. It records the
+# build-specific tool locations and then loads the main lit.cfg.py.
 
-include(GNUInstallDirs)
+config.spirv2clc_tool = r"@SPIRV2CLC_TOOL@"
+config.clang_executable = r"@CLANG_EXECUTABLE@"
+config.filecheck_executable = r"@FILECHECK_EXECUTABLE@"
+config.spirv2clc_test_exec_root = r"@CMAKE_CURRENT_BINARY_DIR@"
 
-add_executable(spirv2clc spirv2clc.cpp)
-add_executable(spirv2clc::tool ALIAS spirv2clc)
-
-target_link_libraries(spirv2clc
-  PRIVATE
-    libspirv2clc
-    spirv2clc::warnings)
-
-install(TARGETS spirv2clc
-  RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT tools)
+lit_config.load_config(config, r"@CMAKE_CURRENT_SOURCE_DIR@/lit.cfg.py")

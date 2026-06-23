@@ -12,49 +12,65 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-add_library(libspirv2clc translator.cpp)
+include(GenerateExportHeader)
+include(GNUInstallDirs)
 
-set_property(TARGET libspirv2clc PROPERTY POSITION_INDEPENDENT_CODE 1)
+# translator.cpp is a unity translation unit: it #includes the sources below
+# directly, so they must NOT be compiled on their own. They are still listed as
+# (header-only) sources so editors and IDEs pick them up.
+set(SPIRV2CLC_UNITY_SOURCES
+  utils.cpp
+  types.cpp
+  instns.cpp
+  instns_ext.cpp)
+
+add_library(libspirv2clc
+  translator.cpp
+  ${SPIRV2CLC_UNITY_SOURCES}
+  "${PROJECT_SOURCE_DIR}/include/spirv2clc.h")
+add_library(spirv2clc::libspirv2clc ALIAS libspirv2clc)
+
+set_source_files_properties(${SPIRV2CLC_UNITY_SOURCES}
+  PROPERTIES HEADER_FILE_ONLY ON)
+
+set_target_properties(libspirv2clc PROPERTIES
+  POSITION_INDEPENDENT_CODE ON
+  CXX_VISIBILITY_PRESET hidden
+  VISIBILITY_INLINES_HIDDEN ON)
 
 target_include_directories(libspirv2clc
   PUBLIC
-    ${PROJECT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_BINARY_DIR} # For the export header
+    "${PROJECT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_BINARY_DIR}" # For the generated export header
   PRIVATE
-    ${OPENCL_HEADERS_DIR}
-    ${SPIRV_TOOLS_DIR}
-    ${SPIRV_TOOLS_DIR}/source
-    ${SPIRV_TOOLS_BINARY_DIR})
+    "${OPENCL_HEADERS_DIR}"
+    "${SPIRV_TOOLS_DIR}"
+    "${SPIRV_TOOLS_DIR}/source"
+    "${SPIRV_TOOLS_BINARY_DIR}")
 
-set_target_properties(libspirv2clc PROPERTIES
-    CXX_VISIBILITY_PRESET hidden
-    VISIBILITY_INLINES_HIDDEN ON
-)
-
-target_link_libraries(libspirv2clc SPIRV-Tools-opt)
+target_link_libraries(libspirv2clc
+  PUBLIC SPIRV-Tools-opt
+  PRIVATE spirv2clc::warnings)
 
 generate_export_header(libspirv2clc)
 
+# ---------------------------------------------------------------------------
+# Installation
+# ---------------------------------------------------------------------------
 install(TARGETS libspirv2clc
-    RUNTIME DESTINATION lib COMPONENT libraries
-    LIBRARY DESTINATION lib COMPONENT libraries
-    ARCHIVE DESTINATION lib COMPONENT libraries
-)
+  RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT libraries
+  LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT libraries
+  ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT libraries)
 install(FILES
-        "${PROJECT_SOURCE_DIR}/include/spirv2clc.h"
-        "${CMAKE_CURRENT_BINARY_DIR}/libspirv2clc_export.h"
-    DESTINATION include
-    COMPONENT headers
-)
+    "${PROJECT_SOURCE_DIR}/include/spirv2clc.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/libspirv2clc_export.h"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+  COMPONENT headers)
 install(DIRECTORY "${SPIRV_TOOLS_DIR}/include"
-    DESTINATION .
-    COMPONENT headers
-    FILES_MATCHING
-        PATTERN "spirv-tools/libspirv.h"
-)
+  DESTINATION .
+  COMPONENT headers
+  FILES_MATCHING PATTERN "spirv-tools/libspirv.h")
 install(DIRECTORY "${SPIRV-Headers_SOURCE_DIR}/include"
-    DESTINATION .
-    COMPONENT headers
-    FILES_MATCHING
-        PATTERN "spirv/unified1/spirv.h"
-)
+  DESTINATION .
+  COMPONENT headers
+  FILES_MATCHING PATTERN "spirv/unified1/spirv.h")

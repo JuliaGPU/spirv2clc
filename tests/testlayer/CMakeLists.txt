@@ -12,10 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-if (APPLE)
-set(CMAKE_SHARED_LINKER_FLAGS "-undefined dynamic_lookup")
-endif()
-
 add_library(testlayer SHARED testlayer.cpp)
-target_include_directories(testlayer PRIVATE ${OPENCL_HEADERS_DIR})
-target_link_libraries(testlayer dl)
+
+target_include_directories(testlayer PRIVATE "${OPENCL_HEADERS_DIR}")
+target_link_libraries(testlayer PRIVATE ${CMAKE_DL_LIBS} spirv2clc::warnings)
+
+if(APPLE)
+  # The layer resolves the real OpenCL symbols at runtime via the loader.
+  target_link_options(testlayer PRIVATE -undefined dynamic_lookup)
+endif()

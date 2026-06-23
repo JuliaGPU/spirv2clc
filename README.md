@@ -17,14 +17,34 @@ This project depends on the following other projects:
 
 # Building
 
-spirv2clc uses CMake as its build system and the following should work on most systems:
+spirv2clc uses CMake (3.24 or newer) as its build system. A configure preset is
+provided that configures and builds in `./build`:
 
 ```
-git submodule update --init
-mkdir build
-cd build
-cmake ..
-cmake --build .
+cmake --preset default
+cmake --build build
+```
+
+CMake initializes the git submodules under `external/` automatically on the
+first configure (pass `-DSPIRV2CLC_UPDATE_SUBMODULES=OFF` to manage them
+yourself). `debug` and `release` presets are also available, e.g.
+`cmake --preset debug`. Without presets, the classic invocation still works:
+
+```
+git submodule update --init --recursive
+cmake -S . -B build -G Ninja
+cmake --build build
+```
+
+# Running the tests
+
+The regression tests are driven by [`lit`](https://pypi.org/project/lit/) and
+require `clang` and `FileCheck` on the `PATH`. After building, run them with
+either:
+
+```
+ctest --preset default       # or: ctest --test-dir build
+cmake --build build --target check
 ```
 
 # Using the translator tool
@@ -32,7 +52,7 @@ cmake --build .
 A command line translator tool is provided and can be used as follows:
 
 ```
-./build/tools/spirv2clc module.spv
+./build/bin/spirv2clc module.spv
 ```
 
 The translated source is printed to the standard output.
@@ -93,8 +113,8 @@ The layer expects the following tools to be in the `PATH`:
 and can be used as follows:
 
 ```
-LD_PRELOAD=./build/testlayer/libtestlayer.so \
-PATH=/path/to/build:/path/to/other-tools:$PATH \
+LD_PRELOAD=./build/lib/libtestlayer.so \
+PATH=/path/to/build/bin:/path/to/other-tools:$PATH \
 /path/to/opencl-application
 ```
 

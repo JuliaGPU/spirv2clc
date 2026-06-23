@@ -17,19 +17,46 @@ if(NOT WIN32)
   add_subdirectory(testlayer)
 endif()
 
-# Add lit tests
-find_program(LIT_COMMAND lit)
-if(LIT_COMMAND)
+# ---------------------------------------------------------------------------
+# lit-based regression tests
+#
+# Each case under cases/ drives spirv2clc through clang and FileCheck. The
+# tests are only registered when the required tools are available; otherwise
+# they are skipped with a status message rather than failing configuration.
+# ---------------------------------------------------------------------------
+find_program(LIT_COMMAND NAMES lit llvm-lit)
+find_program(CLANG_EXECUTABLE NAMES clang)
+find_program(FILECHECK_EXECUTABLE NAMES FileCheck)
+
+if(LIT_COMMAND AND CLANG_EXECUTABLE AND FILECHECK_EXECUTABLE)
+  # Single-config generators place the tool directly in the runtime output
+  # directory; this is the common case for running the lit suite.
+  set(SPIRV2CLC_TOOL
+    "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/spirv2clc${CMAKE_EXECUTABLE_SUFFIX}")
+
   configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/lit.site.cfg.py.in
-    ${CMAKE_CURRENT_BINARY_DIR}/lit.site.cfg.py
+    "${CMAKE_CURRENT_SOURCE_DIR}/lit.site.cfg.py.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/lit.site.cfg.py"
     @ONLY)
 
+  # Run via CTest (`ctest` / `ctest --preset default`). The tool must be built
+  # first, e.g. `cmake --build build && ctest --test-dir build`.
+  add_test(NAME lit
+    COMMAND "${LIT_COMMAND}" -sv "${CMAKE_CURRENT_BINARY_DIR}")
+
+  # Convenience target that builds the tool and then runs the suite in one go.
   add_custom_target(check
-    COMMAND ${LIT_COMMAND} -v ${CMAKE_CURRENT_BINARY_DIR}
+    COMMAND "${LIT_COMMAND}" -sv "${CMAKE_CURRENT_BINARY_DIR}"
     DEPENDS spirv2clc
     COMMENT "Running spirv2clc regression tests"
     USES_TERMINAL)
 else()
-  message(WARNING "lit not found - lit tests will not be available")
+  set(_missing_tools "")
+  foreach(tool LIT_COMMAND CLANG_EXECUTABLE FILECHECK_EXECUTABLE)
+    if(NOT ${tool})
+      string(APPEND _missing_tools " ${tool}")
+    endif()
+  endforeach()
+  message(STATUS
+    "lit tests disabled; missing tools:${_missing_tools}")
 endif()
