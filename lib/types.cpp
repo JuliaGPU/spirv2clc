@@ -135,8 +135,20 @@ bool translator::translate_type(const Instruction &inst) {
     break;
   }
   case spv::Op::OpTypeArray: {
-    // Array types are handled in variable declarations
-    // We don't register a type name for them since they need special syntax
+    // C cannot spell a bare array type as a prefix (the name sits inside the
+    // declarator) and bare arrays are not assignable. Wrap every array in a
+    // struct so it becomes a first-class, copyable value type with a real
+    // name. Layout matches ELEM[N] exactly (single trailing array member), so
+    // a pointer-to-array is just a pointer-to-wrapper with the correct stride.
+    auto elemtyid = inst.GetSingleWordOperand(1);
+    uint32_t len = array_type_get_length(result);
+    if (len == 0) {
+      return false;
+    }
+    std::string aname = make_valid_identifier("arr" + std::to_string(result));
+    m_src << "typedef struct { " << src_type(elemtyid) << " e["
+          << std::to_string(len) << "]; } " << aname << ";" << std::endl;
+    typestr = aname;
     break;
   }
   case spv::Op::OpTypeImage: {
