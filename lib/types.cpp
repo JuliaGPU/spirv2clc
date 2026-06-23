@@ -25,8 +25,15 @@ std::string translator::src_pointer_type(uint32_t storage, uint32_t tyid, bool s
   case SpvStorageClassInput:
     break;
   case SpvStorageClassFunction:
-    typestr += "generic";
+    typestr += "private";
     break;
+  case SpvStorageClassGeneric:
+    // OpenCL 1.2 has no generic address space. We could resolve the storage
+    // class from the pointer's origin, but that's not implemented yet; error
+    // loudly rather than silently emit an unsupported qualifier.
+    std::cerr << "UNIMPLEMENTED generic address space (no OpenCL 1.2 mapping)"
+              << std::endl;
+    return "UNIMPLEMENTED";
   default:
     std::cerr << "UNIMPLEMENTED pointer storage class " << storage
               << std::endl;

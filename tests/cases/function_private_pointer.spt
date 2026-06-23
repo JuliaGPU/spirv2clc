@@ -1,0 +1,19 @@
+; A Function storage-class pointer maps to the private address space; it used
+; to emit the nonexistent OpenCL 1.2 `generic` qualifier.
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Linkage
+               OpMemoryModel Physical64 OpenCL
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+       %p_fn = OpTypePointer Function %uint
+       %fnty = OpTypeFunction %void %p_fn
+         %fn = OpFunction %void None %fnty
+          %p = OpFunctionParameter %p_fn
+        %lbl = OpLabel
+          %v = OpLoad %uint %p
+               OpReturn
+               OpFunctionEnd
+; CHECK: private
