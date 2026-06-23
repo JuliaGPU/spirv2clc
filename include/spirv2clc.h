@@ -100,6 +100,9 @@ private:
                                const spvtools::opt::analysis::Type *ty,
                                uint32_t index) const;
 
+  bool emit_access_chain(const spvtools::opt::Instruction &inst,
+                         bool ptr_variant, std::string &sval) const;
+
   std::string src_vec_comp(uint32_t val, uint32_t comp) const {
     std::stringstream scomp;
     scomp << std::hex << comp;

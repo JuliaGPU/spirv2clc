@@ -1,0 +1,27 @@
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+; OpAccessChain (no leading element index): the first index walks into the
+; pointee. Used to hit UNIMPLEMENTED (only the InBounds Ptr variant existed).
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Linkage
+               OpMemoryModel Physical64 OpenCL
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+     %uint_0 = OpConstant %uint 0
+     %uint_4 = OpConstant %uint 4
+     %uint_2 = OpConstant %uint 2
+        %arr = OpTypeArray %uint %uint_4
+     %struct = OpTypeStruct %arr
+    %pstruct = OpTypePointer Function %struct
+      %puint = OpTypePointer Function %uint
+       %fnty = OpTypeFunction %void %pstruct
+         %fn = OpFunction %void None %fnty
+      %param = OpFunctionParameter %pstruct
+        %lbl = OpLabel
+               ; &param->m0.e[2]
+        %elt = OpAccessChain %puint %param %uint_0 %uint_2
+               OpReturn
+               OpFunctionEnd
+; CHECK: ->m0
+; CHECK-SAME: ->e[

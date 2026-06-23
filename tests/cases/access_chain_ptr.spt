@@ -1,0 +1,24 @@
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+; OpPtrAccessChain (non-InBounds) used to hit UNIMPLEMENTED. With a leading
+; element index on a pointer-to-array, the stride must be a whole array: the
+; base is typed as the array wrapper, so C pointer arithmetic is correct.
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Linkage
+               OpMemoryModel Physical64 OpenCL
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+     %uint_1 = OpConstant %uint 1
+     %uint_4 = OpConstant %uint 4
+        %arr = OpTypeArray %uint %uint_4
+       %parr = OpTypePointer CrossWorkgroup %arr
+       %fnty = OpTypeFunction %void %parr
+         %fn = OpFunction %void None %fnty
+      %param = OpFunctionParameter %parr
+        %lbl = OpLabel
+               ; step one whole array forward
+        %nxt = OpPtrAccessChain %parr %param %uint_1
+               OpReturn
+               OpFunctionEnd
+; CHECK: arr{{[0-9]+}} global* {{v[0-9]+}} = &

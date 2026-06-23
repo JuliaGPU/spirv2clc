@@ -1,4 +1,49 @@
 
+bool translator::emit_access_chain(const Instruction &inst, bool ptr_variant,
+                                   std::string &sval) const {
+  auto base = inst.GetSingleWordOperand(2);
+  const Type *cty = type_for_val(base)->AsPointer()->pointee_type();
+  unsigned i;
+  if (ptr_variant) {
+    // The Ptr* variants take a leading Element index that does pointer
+    // arithmetic on the base (scaled by the pointee size, which is correct now
+    // that pointer-to-array is a pointer-to-wrapper).
+    auto elem = inst.GetSingleWordOperand(3);
+    sval = "&" + var_for(base) + "[" + var_for(elem) + "]";
+    i = 4;
+  } else {
+    // The plain variants' first index walks into the pointee directly.
+    sval = var_for(base);
+    i = 3;
+  }
+  for (; i < inst.NumOperands(); i++) {
+    auto idx = inst.GetSingleWordOperand(i);
+    sval = src_access_chain(sval, cty, idx);
+    switch (cty->kind()) {
+    case Type::Kind::kArray:
+      cty = cty->AsArray()->element_type();
+      break;
+    case Type::Kind::kStruct: {
+      auto cstmgr = m_ir->get_constant_mgr();
+      auto idx_cst = cstmgr->FindDeclaredConstant(idx);
+      if (idx_cst == nullptr) {
+        std::cerr << "UNIMPLEMENTED struct access with non-constant index"
+                  << std::endl;
+        return false;
+      }
+      uint32_t struct_idx = idx_cst->GetU32();
+      cty = cty->AsStruct()->element_types()[struct_idx];
+      break;
+    }
+    default:
+      std::cerr << "UNIMPLEMENTED access chain type " << cty->kind()
+                << std::endl;
+      return false;
+    }
+  }
+  return true;
+}
+
 bool translator::translate_instruction(const Instruction &inst,
                                        std::string &src) {
   auto opcode = inst.opcode();
@@ -93,34 +138,17 @@ bool translator::translate_instruction(const Instruction &inst,
     sval = src_cast(rtype, src);
     break;
   }
+  case spv::Op::OpPtrAccessChain:
   case spv::Op::OpInBoundsPtrAccessChain: {
-    auto base = inst.GetSingleWordOperand(2);
-    auto elem = inst.GetSingleWordOperand(3);
-    sval = "&" + var_for(base) + "[" + var_for(elem) + "]";
-    const Type *cty = type_for_val(base)->AsPointer()->pointee_type();
-    for (unsigned i = 4; i < inst.NumOperands(); i++) {
-      auto idx = inst.GetSingleWordOperand(i);
-      sval = src_access_chain(sval, cty, idx);
-      switch (cty->kind()) {
-      case Type::Kind::kArray:
-        cty = cty->AsArray()->element_type();
-        break;
-      case Type::Kind::kStruct: {
-        auto cstmgr = m_ir->get_constant_mgr();
-        auto idx_cst = cstmgr->FindDeclaredConstant(idx);
-        if (idx_cst == nullptr) {
-          std::cerr << "UNIMPLEMENTED struct access with non-constant index" << std::endl;
-          return false;
-        }
-        uint32_t struct_idx = idx_cst->GetU32();
-        cty = cty->AsStruct()->element_types()[struct_idx];
-        break;
-      }
-      default:
-        std::cerr << "UNIMPLEMENTED access chain type " << cty->kind()
-                  << std::endl;
-        return false;
-      }
+    if (!emit_access_chain(inst, /*ptr_variant=*/true, sval)) {
+      return false;
+    }
+    break;
+  }
+  case spv::Op::OpAccessChain:
+  case spv::Op::OpInBoundsAccessChain: {
+    if (!emit_access_chain(inst, /*ptr_variant=*/false, sval)) {
+      return false;
     }
     break;
   }
