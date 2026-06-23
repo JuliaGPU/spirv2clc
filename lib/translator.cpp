@@ -223,7 +223,21 @@ bool translator::translate_debug_instructions() {
     case spv::Op::OpName: {
       auto id = inst.GetSingleWordOperand(0);
       auto name = inst.GetOperand(1).AsString();
-      std::replace(name.begin(), name.end(), '.', '_');
+      // Sanitize into a valid C identifier: map any character that isn't a
+      // letter, digit or underscore to '_' (e.g. Julia names like
+      // "a::CLDeviceArray"), and avoid a leading digit.
+      auto valid_char = [](char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+               (c >= '0' && c <= '9') || c == '_';
+      };
+      for (auto &ch : name) {
+        if (!valid_char(ch)) {
+          ch = '_';
+        }
+      }
+      if (!name.empty() && name[0] >= '0' && name[0] <= '9') {
+        name = "_" + name;
+      }
       m_names[id] = name;
       break;
     }
