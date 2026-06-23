@@ -655,7 +655,15 @@ bool translator::translate_instruction(const Instruction &inst,
       sval += "_" + rounding_mode(rmode);
     }
 
-    sval += "(" + var_for(op) + ")";
+    // OpConvertSToF interprets the operand as a signed integer. Integer
+    // variables are emitted as unsigned C types, so a bare convert_float()
+    // would perform an unsigned conversion (e.g. -1 -> 1.8e19). Reinterpret
+    // the operand as signed first. OpConvertUToF takes it as-is (unsigned).
+    if (opcode == spv::Op::OpConvertSToF) {
+      sval += "(" + src_as_signed(op) + ")";
+    } else {
+      sval += "(" + var_for(op) + ")";
+    }
 
     break;
   }

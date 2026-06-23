@@ -1,0 +1,23 @@
+; OpConvertSToF reads its operand as signed, but integer values are emitted as
+; unsigned C types, so it must reinterpret the operand as signed first;
+; otherwise -1 converts to 1.8e19 instead of -1.0.
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Linkage
+               OpMemoryModel Physical64 OpenCL
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+        %f32 = OpTypeFloat 32
+      %p_g_f = OpTypePointer CrossWorkgroup %f32
+       %fnty = OpTypeFunction %void %uint %p_g_f
+         %fn = OpFunction %void None %fnty
+          %x = OpFunctionParameter %uint
+        %out = OpFunctionParameter %p_g_f
+        %lbl = OpLabel
+          %r = OpConvertSToF %f32 %x
+               OpStore %out %r
+               OpReturn
+               OpFunctionEnd
+; CHECK: convert_float(as_int(
