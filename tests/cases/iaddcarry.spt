@@ -1,0 +1,25 @@
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+; OpIAddCarry / OpISubBorrow (emitted by checked integer arithmetic under
+; --check-bounds) used to hit UNIMPLEMENTED. They lower to a {low, carry/borrow}
+; struct.
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Linkage
+               OpMemoryModel Physical64 OpenCL
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+         %st = OpTypeStruct %uint %uint
+      %puint = OpTypePointer CrossWorkgroup %st
+       %fnty = OpTypeFunction %void %uint %uint %puint
+         %fn = OpFunction %void None %fnty
+          %a = OpFunctionParameter %uint
+          %b = OpFunctionParameter %uint
+        %out = OpFunctionParameter %puint
+        %lbl = OpLabel
+          %c = OpIAddCarry %st %a %b
+          %d = OpISubBorrow %st %a %b
+               OpStore %out %c
+               OpReturn
+               OpFunctionEnd
+; CHECK: = {(uint)(

@@ -161,6 +161,25 @@ bool translator::translate_instruction(const Instruction &inst,
     sval = src_cast(rtype, src);
     break;
   }
+  case spv::Op::OpIAddCarry:
+  case spv::Op::OpISubBorrow: {
+    // Result is a struct { low, carry/borrow } whose members share the operand
+    // type. For unsigned add the carry is (sum < a); for sub the borrow is
+    // (a < b). Emitted as a struct initializer.
+    auto a = inst.GetSingleWordOperand(2);
+    auto b = inst.GetSingleWordOperand(3);
+    auto va = var_for(a);
+    auto vb = var_for(b);
+    std::string mt = src_type(type_id_for(a));
+    if (opcode == spv::Op::OpIAddCarry) {
+      sval = "{(" + mt + ")(" + va + " + " + vb + "), (" + mt + ")((" + mt +
+             ")(" + va + " + " + vb + ") < " + va + ")}";
+    } else {
+      sval = "{(" + mt + ")(" + va + " - " + vb + "), (" + mt + ")(" + va +
+             " < " + vb + ")}";
+    }
+    break;
+  }
   case spv::Op::OpPtrAccessChain:
   case spv::Op::OpInBoundsPtrAccessChain: {
     if (!emit_access_chain(inst, /*ptr_variant=*/true, sval)) {

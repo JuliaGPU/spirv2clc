@@ -366,6 +366,10 @@ bool translator::translate_annotations() {
       case SpvDecorationNoSignedWrap:
       case SpvDecorationNoUnsignedWrap:
         break;
+      case SpvDecorationMaxByteOffset:
+      case SpvDecorationMaxByteOffsetId:
+        // Pointer access-range hints; nothing to emit.
+        break;
       default:
         std::cerr << "UNIMPLEMENTED decoration " << decoration << std::endl;
         return false;

@@ -1,0 +1,17 @@
+; RUN: %spirv2clc --asm --spirv-version=1.4 %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; MaxByteOffset is a pointer access-range hint and used to hit UNIMPLEMENTED.
+; (MaxByteOffset requires SPIR-V 1.1+.)
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Linkage
+               OpMemoryModel Physical64 OpenCL
+               OpDecorate %p MaxByteOffset 1024
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+      %puint = OpTypePointer CrossWorkgroup %uint
+       %fnty = OpTypeFunction %void %puint
+         %fn = OpFunction %void None %fnty
+          %p = OpFunctionParameter %puint
+        %lbl = OpLabel
+               OpReturn
+               OpFunctionEnd
