@@ -278,6 +278,10 @@ bool translator::translate_annotations() {
       case SpvDecorationFuncParamAttr: {
         auto param_attr = inst.GetSingleWordOperand(2);
         switch (param_attr) {
+        case SpvFunctionParameterAttributeZext:
+        case SpvFunctionParameterAttributeSext:
+          // Integer extension hints for the ABI; nothing to emit.
+          break;
         case SpvFunctionParameterAttributeNoCapture:
           break;
         case SpvFunctionParameterAttributeNoWrite:

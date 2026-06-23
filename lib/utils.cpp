@@ -149,9 +149,19 @@ bool translator::get_null_constant(uint32_t tyid, std::string &src) const {
   case Type::Kind::kInteger:
     src = src_cast(tyid, "0");
     break;
-  case Type::Kind::kFloat:
-    src = "0.0";
+  case Type::Kind::kFloat: {
+    // Emit a width-typed zero so it doesn't default to double and create
+    // ambiguous overloads (e.g. isordered(float, 0.0)).
+    auto width = type->AsFloat()->width();
+    if (width == 16) {
+      src = "0.0h";
+    } else if (width == 32) {
+      src = "0.0f";
+    } else {
+      src = "0.0";
+    }
     break;
+  }
   case Type::Kind::kArray:
   case Type::Kind::kStruct:
     // Both are emitted as C structs (arrays are struct-wrapped). Use a
@@ -401,15 +411,25 @@ translator::get_string_literal(const spvtools::opt::Instruction &inst) const {
 
   auto defuse = m_ir->get_def_use_mgr();
 
-  // Check that the last element is a null terminator
-  auto last_elem_id = inst.GetSingleWordOperand(num_elems - 1 + 2);
-  auto last_elem_inst = defuse->GetDef(last_elem_id);
-  if (!last_elem_inst || last_elem_inst->opcode() != spv::Op::OpConstant) {
+  // Resolve a character element to its byte value. The null terminator (and
+  // any zero byte) may be encoded as OpConstantNull rather than OpConstant 0.
+  auto elem_byte = [&](uint32_t elem_id) -> std::optional<uint8_t> {
+    auto elem_inst = defuse->GetDef(elem_id);
+    if (!elem_inst) {
+      return std::nullopt;
+    }
+    if (elem_inst->opcode() == spv::Op::OpConstantNull) {
+      return 0;
+    }
+    if (elem_inst->opcode() == spv::Op::OpConstant) {
+      return static_cast<uint8_t>(elem_inst->GetOperand(2).words[0]);
+    }
     return std::nullopt;
-  }
-  auto &last_op_val = last_elem_inst->GetOperand(2);
-  uint8_t last_value = static_cast<uint8_t>(last_op_val.words[0]);
-  if (last_value != 0) {
+  };
+
+  // Check that the last element is a null terminator
+  auto last_value = elem_byte(inst.GetSingleWordOperand(num_elems - 1 + 2));
+  if (!last_value || *last_value != 0) {
     return std::nullopt;
   }
 
@@ -418,16 +438,12 @@ translator::get_string_literal(const spvtools::opt::Instruction &inst) const {
   // Iterate through all elements except the last (null terminator)
   for (uint32_t i = 0; i < num_elems - 1; i++) {
     auto elem_id = inst.GetSingleWordOperand(i + 2);
-    auto elem_inst = defuse->GetDef(elem_id);
 
-    // Must be a constant
-    if (!elem_inst || elem_inst->opcode() != spv::Op::OpConstant) {
+    auto maybe_value = elem_byte(elem_id);
+    if (!maybe_value) {
       return std::nullopt;
     }
-
-    // Get the raw constant value
-    auto &op_val = elem_inst->GetOperand(2);
-    uint8_t value = static_cast<uint8_t>(op_val.words[0]);
+    uint8_t value = *maybe_value;
 
     // Bail out if we encounter a null within the string content
     if (value == 0) {

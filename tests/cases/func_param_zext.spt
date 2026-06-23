@@ -1,0 +1,16 @@
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; A Zext (or Sext) FuncParamAttr is an ABI hint; it used to hit UNIMPLEMENTED.
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Int8
+               OpCapability Linkage
+               OpMemoryModel Physical64 OpenCL
+               OpDecorate %p FuncParamAttr Zext
+       %void = OpTypeVoid
+      %uchar = OpTypeInt 8 0
+       %fnty = OpTypeFunction %void %uchar
+         %fn = OpFunction %void None %fnty
+          %p = OpFunctionParameter %uchar
+        %lbl = OpLabel
+               OpReturn
+               OpFunctionEnd

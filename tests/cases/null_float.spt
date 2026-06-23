@@ -1,0 +1,19 @@
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+; A null/zero 32-bit float must be width-typed (0.0f), not a double literal,
+; otherwise float builtins (e.g. isordered) become ambiguous.
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Linkage
+               OpMemoryModel Physical64 OpenCL
+       %void = OpTypeVoid
+      %float = OpTypeFloat 32
+         %pf = OpTypePointer Function %float
+       %zero = OpConstantNull %float
+       %fnty = OpTypeFunction %void
+         %fn = OpFunction %void None %fnty
+        %lbl = OpLabel
+          %v = OpVariable %pf Function %zero
+               OpReturn
+               OpFunctionEnd
+; CHECK: 0.0f

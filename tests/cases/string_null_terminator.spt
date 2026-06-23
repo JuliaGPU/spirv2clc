@@ -1,0 +1,29 @@
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+; A constant string whose null terminator is encoded as OpConstantNull (rather
+; than OpConstant 0) must still be recognized as a string literal for printf.
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Int8
+               OpCapability Linkage
+          %1 = OpExtInstImport "OpenCL.std"
+               OpMemoryModel Physical64 OpenCL
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+      %uchar = OpTypeInt 8 0
+     %uint_4 = OpConstant %uint 4
+        %arr = OpTypeArray %uchar %uint_4
+     %pconst = OpTypePointer UniformConstant %arr
+        %c_H = OpConstant %uchar 72
+        %c_i = OpConstant %uchar 105
+       %c_nl = OpConstant %uchar 10
+     %c_null = OpConstantNull %uchar
+       %comp = OpConstantComposite %arr %c_H %c_i %c_nl %c_null
+          %g = OpVariable %pconst UniformConstant %comp
+       %fnty = OpTypeFunction %void
+         %fn = OpFunction %void None %fnty
+        %lbl = OpLabel
+          %r = OpExtInst %uint %1 printf %g
+               OpReturn
+               OpFunctionEnd
+; CHECK: printf("Hi

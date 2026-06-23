@@ -142,6 +142,19 @@ bool translator::translate_instruction(const Instruction &inst,
     src = "*" + var_for(ptr) + " = " + var_for(val);
     break;
   }
+  case spv::Op::OpCopyMemory:
+  case spv::Op::OpCopyMemorySized: {
+    auto target = inst.GetSingleWordOperand(0);
+    auto source = inst.GetSingleWordOperand(1);
+    assign_result = false;
+    // Copy the whole pointee by value (arrays are struct-wrapped, so this is a
+    // legal aggregate assignment). The sized form may have differently-typed
+    // but same-sized operands, so reinterpret the target through the source's
+    // pointer type before the copy.
+    src = "*((" + src_type(type_id_for(source)) + ")(" + var_for(target) +
+          ")) = *(" + var_for(source) + ")";
+    break;
+  }
   case spv::Op::OpConvertPtrToU:
   case spv::Op::OpConvertUToPtr: {
     auto src = inst.GetSingleWordOperand(2);

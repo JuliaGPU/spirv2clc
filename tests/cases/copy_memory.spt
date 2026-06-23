@@ -1,0 +1,31 @@
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+; OpCopyMemory (typed) and OpCopyMemorySized (raw byte count, possibly between
+; differently-typed same-sized operands) used to hit UNIMPLEMENTED. They lower
+; to whole-object assignments, reinterpreting the target through the source's
+; pointer type for the sized form.
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Int64
+               OpCapability Linkage
+               OpMemoryModel Physical64 OpenCL
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+      %ulong = OpTypeInt 64 0
+     %uint_2 = OpConstant %uint 2
+    %ulong_8 = OpConstant %ulong 8
+        %arr = OpTypeArray %uint %uint_2
+         %pa = OpTypePointer Function %arr
+         %st = OpTypeStruct %uint %uint
+         %ps = OpTypePointer Function %st
+       %fnty = OpTypeFunction %void %pa %pa %ps
+         %fn = OpFunction %void None %fnty
+          %d = OpFunctionParameter %pa
+          %s = OpFunctionParameter %pa
+         %so = OpFunctionParameter %ps
+        %lbl = OpLabel
+               OpCopyMemory %d %s
+               OpCopyMemorySized %d %so %ulong_8
+               OpReturn
+               OpFunctionEnd
+; CHECK: = *(
