@@ -236,6 +236,8 @@ private:
 
   std::string src_pointer_type(uint32_t storage, uint32_t tyid, bool signedty) const;
 
+  std::string src_aggregate_element_type(uint32_t tyid) const;
+
   std::string builtin_vector_extract(uint32_t id, uint32_t idx, bool constant) const;
 
   bool is_valid_identifier(const std::string& name) const;

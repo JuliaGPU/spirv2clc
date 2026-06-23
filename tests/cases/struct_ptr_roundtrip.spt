@@ -1,0 +1,32 @@
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+; A struct carrying a global pointer (the Julia CLDeviceArray shape). OpenCL
+; forbids pointers in structs, so the member is stored as ulong; loading it
+; through an access chain must reconstruct the real pointer type, after which
+; it can be indexed and dereferenced.
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Linkage
+               OpMemoryModel Physical64 OpenCL
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+     %uint_0 = OpConstant %uint 0
+       %gptr = OpTypePointer CrossWorkgroup %uint
+     %struct = OpTypeStruct %gptr
+    %pstruct = OpTypePointer Function %struct
+    %pmember = OpTypePointer Function %gptr
+       %fnty = OpTypeFunction %void %pstruct
+         %fn = OpFunction %void None %fnty
+      %param = OpFunctionParameter %pstruct
+        %lbl = OpLabel
+         %mp = OpAccessChain %pmember %param %uint_0
+     %loaded = OpLoad %gptr %mp
+        %elt = OpInBoundsPtrAccessChain %gptr %loaded %uint_0
+        %val = OpLoad %uint %elt
+               OpReturn
+               OpFunctionEnd
+; The pointer member is stored as an integer ...
+; CHECK: struct {{v[0-9]+}} {
+; CHECK-NEXT: ulong m0;
+; ... and reconstructed on load.
+; CHECK: = (uint global* private*)(

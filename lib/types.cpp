@@ -1,3 +1,14 @@
+std::string translator::src_aggregate_element_type(uint32_t tyid) const {
+  // OpenCL forbids pointers inside structs/arrays, so encode every pointer leaf
+  // as a same-width integer (ulong under Physical64). Access chains reconstruct
+  // the real pointer type on the way in (see emit_access_chain). Non-pointer
+  // members keep their normal flat type name (arrays are struct-wrapped).
+  if (type_for(tyid)->kind() == Type::Kind::kPointer) {
+    return "ulong";
+  }
+  return src_type(tyid);
+}
+
 std::string translator::src_pointer_type(uint32_t storage, uint32_t tyid, bool signedty) const {
   // Every pointee type (including arrays, which are struct-wrapped) has a flat
   // type name, so a pointer is just "<pointee> <addrspace>*". A pointer-to-array
@@ -107,19 +118,13 @@ bool translator::translate_type(const Instruction &inst) {
     break;
   }
   case spv::Op::OpTypeStruct: { // TODO support volatile members
-    // Declare the structure type
+    // Declare the structure type. Pointer leaves are encoded as integers (see
+    // src_aggregate_element_type), as OpenCL forbids pointers in aggregates.
     m_src << "struct " + var_for(result) + " {" << std::endl;
     for (uint32_t opidx = 1; opidx < inst.NumOperands(); opidx++) {
       auto mid = inst.GetSingleWordOperand(opidx);
-      // Convert pointer members to integers, as most OpenCL compilers refuse
-      // structures with pointer members (even though OpenCL 2.0 allows it).
-      auto member_type = type_for(mid);
-      if (member_type->kind() == Type::Kind::kPointer) {
-        m_src << "  ulong m" << std::to_string(opidx - 1) << ";" << std::endl;
-      } else {
-        m_src << "  " << src_var_decl(mid, "m" + std::to_string(opidx - 1)) << ";"
-              << std::endl;
-      }
+      m_src << "  " << src_aggregate_element_type(mid) << " m"
+            << std::to_string(opidx - 1) << ";" << std::endl;
     }
     m_src << "}";
     if (m_packed.count(result)) {
@@ -143,8 +148,9 @@ bool translator::translate_type(const Instruction &inst) {
       return false;
     }
     std::string aname = make_valid_identifier("arr" + std::to_string(result));
-    m_src << "typedef struct { " << src_type(elemtyid) << " e["
-          << std::to_string(len) << "]; } " << aname << ";" << std::endl;
+    m_src << "typedef struct { " << src_aggregate_element_type(elemtyid)
+          << " e[" << std::to_string(len) << "]; } " << aname << ";"
+          << std::endl;
     typestr = aname;
     break;
   }

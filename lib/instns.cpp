@@ -16,7 +16,9 @@ bool translator::emit_access_chain(const Instruction &inst, bool ptr_variant,
     sval = var_for(base);
     i = 3;
   }
+  bool descended_aggregate = false;
   for (; i < inst.NumOperands(); i++) {
+    descended_aggregate = true;
     auto idx = inst.GetSingleWordOperand(i);
     sval = src_access_chain(sval, cty, idx);
     switch (cty->kind()) {
@@ -40,6 +42,14 @@ bool translator::emit_access_chain(const Instruction &inst, bool ptr_variant,
                 << std::endl;
       return false;
     }
+  }
+  // If the chain descended through an aggregate to land on a pointer slot, that
+  // slot was encoded as an integer (see src_aggregate_element_type). Cast the
+  // address back to the real pointer type so the subsequent load/store of the
+  // reconstructed pointer type-checks; the bit pattern is preserved under
+  // Physical64 where pointers are pointer-width integers.
+  if (descended_aggregate && cty->kind() == Type::Kind::kPointer) {
+    sval = "(" + src_type(inst.type_id()) + ")(" + sval + ")";
   }
   return true;
 }

@@ -1,0 +1,29 @@
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+; An array-of-pointers member nested in a struct. The pointer leaves must be
+; integer-encoded (the wrapper element type is ulong, not a raw pointer, which
+; OpenCL would reject), and a chain reaching one must reconstruct the pointer.
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Linkage
+               OpMemoryModel Physical64 OpenCL
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+     %uint_0 = OpConstant %uint 0
+     %uint_1 = OpConstant %uint 1
+     %uint_2 = OpConstant %uint 2
+       %gptr = OpTypePointer CrossWorkgroup %uint
+        %arr = OpTypeArray %gptr %uint_2
+     %struct = OpTypeStruct %arr
+    %pstruct = OpTypePointer Function %struct
+    %pmember = OpTypePointer Function %gptr
+       %fnty = OpTypeFunction %void %pstruct
+         %fn = OpFunction %void None %fnty
+      %param = OpFunctionParameter %pstruct
+        %lbl = OpLabel
+         %mp = OpAccessChain %pmember %param %uint_0 %uint_1
+     %loaded = OpLoad %gptr %mp
+               OpReturn
+               OpFunctionEnd
+; CHECK: typedef struct { ulong e[2]; }
+; CHECK: = (uint global* private*)(
