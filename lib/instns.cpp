@@ -147,12 +147,19 @@ bool translator::translate_instruction(const Instruction &inst,
     auto target = inst.GetSingleWordOperand(0);
     auto source = inst.GetSingleWordOperand(1);
     assign_result = false;
-    // Copy the whole pointee by value (arrays are struct-wrapped, so this is a
-    // legal aggregate assignment). The sized form may have differently-typed
-    // but same-sized operands, so reinterpret the target through the source's
-    // pointer type before the copy.
-    src = "*((" + src_type(type_id_for(source)) + ")(" + var_for(target) +
-          ")) = *(" + var_for(source) + ")";
+    // Copy the pointee by value (arrays are struct-wrapped, so this is a legal
+    // aggregate assignment). The sized form may have differently-typed (but
+    // same-sized) operands, and the two pointers may live in different address
+    // spaces. A pointer cast cannot change a pointer's address space, so cast
+    // the source to the target's pointee type *within the source's own address
+    // space* and let the value assignment cross address spaces (always legal).
+    auto src_storage =
+        static_cast<uint32_t>(type_for_val(source)->AsPointer()->storage_class());
+    auto tgt_pointee =
+        m_ir->get_type_mgr()->GetId(type_for_val(target)->AsPointer()->pointee_type());
+    src = "*(" + var_for(target) + ") = *((" +
+          src_pointer_type(src_storage, tgt_pointee, false) + ")(" +
+          var_for(source) + "))";
     break;
   }
   case spv::Op::OpConvertPtrToU:

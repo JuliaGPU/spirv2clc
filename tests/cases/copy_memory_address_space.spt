@@ -1,0 +1,25 @@
+; OpCopyMemory between pointers in different address spaces (here global ->
+; private). A pointer cast cannot change a pointer's address space, so the copy
+; must keep each pointer in its own space and let the value assignment cross
+; spaces -- casting the target into the source's space (as it used to) is
+; rejected by clang: "changes address space of pointer".
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+        %p_g = OpTypePointer CrossWorkgroup %uint
+        %p_f = OpTypePointer Function %uint
+       %fnty = OpTypeFunction %void %p_g
+          %k = OpFunction %void None %fnty
+         %in = OpFunctionParameter %p_g
+        %lbl = OpLabel
+        %tmp = OpVariable %p_f Function
+               OpCopyMemory %tmp %in
+               OpReturn
+               OpFunctionEnd
+; The target is dereferenced directly; the cast sits on the source (read) side.
+; CHECK: = *((uint global*)(
