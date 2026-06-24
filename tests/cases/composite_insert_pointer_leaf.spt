@@ -1,0 +1,28 @@
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+; Pointers are forbidden inside OpenCL C aggregates, so spirv2clc encodes a
+; pointer leaf as a same-width integer (ulong). Writing a pointer value into
+; such a leaf (OpCompositeInsert/OpCompositeConstruct) must cast the pointer to
+; that integer type, mirroring the reconstruction on read; a bare assignment is
+; an "incompatible pointer to integer conversion" that real drivers reject.
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Int8
+               OpCapability Int64
+               OpCapability Linkage
+               OpMemoryModel Physical64 OpenCL
+       %void = OpTypeVoid
+      %uchar = OpTypeInt 8 0
+       %uint = OpTypeInt 32 0
+     %uint_1 = OpConstant %uint 1
+       %pptr = OpTypePointer Function %uchar
+        %arr = OpTypeArray %pptr %uint_1
+       %null = OpConstantNull %pptr
+      %undef = OpUndef %arr
+       %fnty = OpTypeFunction %void
+         %fn = OpFunction %void None %fnty
+        %lbl = OpLabel
+        %ins = OpCompositeInsert %arr %null %undef 0
+               OpReturn
+               OpFunctionEnd
+; CHECK: .e[0] = (ulong)(

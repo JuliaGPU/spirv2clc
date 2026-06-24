@@ -286,6 +286,12 @@ private:
 
   std::string src_aggregate_element_type(uint32_t tyid) const;
 
+  // Render a value being written into an aggregate leaf of SPIR-V type `tyid`.
+  // Pointer leaves are stored as integers (see src_aggregate_element_type), so
+  // a pointer value is cast to that integer type on the way in, mirroring the
+  // reconstruction in emit_access_chain.
+  std::string src_aggregate_element_value(uint32_t tyid, uint32_t object) const;
+
   std::string builtin_vector_extract(uint32_t id, uint32_t idx, bool constant) const;
 
   bool is_valid_identifier(const std::string& name) const;

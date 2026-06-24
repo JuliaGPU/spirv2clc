@@ -9,6 +9,14 @@ std::string translator::src_aggregate_element_type(uint32_t tyid) const {
   return src_type(tyid);
 }
 
+std::string translator::src_aggregate_element_value(uint32_t tyid,
+                                                    uint32_t object) const {
+  if (type_for(tyid)->kind() == Type::Kind::kPointer) {
+    return "(" + src_aggregate_element_type(tyid) + ")(" + var_for(object) + ")";
+  }
+  return var_for(object);
+}
+
 std::string translator::address_space_qualifier(uint32_t storage) const {
   switch (storage) {
   case SpvStorageClassCrossWorkgroup:

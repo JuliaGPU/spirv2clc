@@ -529,12 +529,14 @@ bool translator::translate_instruction(const Instruction &inst,
       break;
     case Type::Kind::kArray:
       // Arrays are struct-wrapped; index through the 'e' member.
-      src += var_for(result) + ".e[" + std::to_string(index) +
-             "] = " + var_for(object);
+      src += var_for(result) + ".e[" + std::to_string(index) + "] = " +
+             src_aggregate_element_value(
+                 type_id_for(type->AsArray()->element_type()), object);
       break;
     case Type::Kind::kStruct:
       src += var_for(result) + ".m" + std::to_string(index) + " = " +
-             var_for(object);
+             src_aggregate_element_value(
+                 type_id_for(type->AsStruct()->element_types()[index]), object);
       break;
     default:
       std::cerr << "UNIMPLEMENTED OpCompositeInsert, type " << type->kind()
@@ -546,13 +548,25 @@ bool translator::translate_instruction(const Instruction &inst,
   case spv::Op::OpCompositeConstruct: {
     // Arrays are struct-wrapped, so their elements live in the 'e' member and
     // need an extra brace level: { { e0, e1, ... } }.
-    bool is_array = type_for(rtype)->kind() == Type::Kind::kArray;
+    auto type = type_for(rtype);
+    bool is_array = type->kind() == Type::Kind::kArray;
+    bool is_struct = type->kind() == Type::Kind::kStruct;
     sval = is_array ? "{{" : "{";
     const char *sep = "";
     for (unsigned i = 2; i < inst.NumOperands(); i++) {
       auto mem = inst.GetSingleWordOperand(i);
       sval += sep;
-      sval += var_for(mem);
+      // Pointer leaves are integer-encoded, so cast a pointer member to the
+      // leaf's type (see src_aggregate_element_value).
+      if (is_array) {
+        sval += src_aggregate_element_value(
+            type_id_for(type->AsArray()->element_type()), mem);
+      } else if (is_struct) {
+        sval += src_aggregate_element_value(
+            type_id_for(type->AsStruct()->element_types()[i - 2]), mem);
+      } else {
+        sval += var_for(mem);
+      }
       sep = ", ";
     }
     sval += is_array ? "}}" : "}";
