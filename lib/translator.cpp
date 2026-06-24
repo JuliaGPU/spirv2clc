@@ -22,6 +22,7 @@
 #include "spirv/unified1/OpenCL.std.h"
 
 #include <algorithm>
+#include <cstring>
 #include <set>
 
 using namespace spvtools;
@@ -59,7 +60,7 @@ std::string rounding_mode(SpvFPRoundingMode mode) {
 const spvtools::MessageConsumer spvtools_message_consumer =
     [](spv_message_level_t level, const char *, const spv_position_t &position,
        const char *message) {
-      const char *levelstr;
+      const char *levelstr = "UNKNOWN";
       switch (level) {
       case SPV_MSG_FATAL:
         levelstr = "FATAL";

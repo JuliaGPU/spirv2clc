@@ -306,7 +306,8 @@ bool translator::translate_types_values() {
           out << std::fixed << val << "h";
         } else if (width == 32) {
           uint32_t w0 = op_val.words[0];
-          float val = *reinterpret_cast<float *>(&w0);
+          float val;
+          std::memcpy(&val, &w0, sizeof(val));
           if (std::isinf(val)) {
             if (std::signbit(val)) {
               out << "-";
@@ -322,7 +323,8 @@ bool translator::translate_types_values() {
           uint64_t w0 = op_val.words[0];
           uint64_t w1 = op_val.words[1];
           auto w = w1 << 32 | w0;
-          double val = *reinterpret_cast<double *>(&w);
+          double val;
+          std::memcpy(&val, &w, sizeof(val));
           // NAN/INFINITY are float macros; cast to double so double-typed uses
           // (e.g. copysign(0.0, (double)NAN)) aren't ambiguous against the float
           // overloads.
