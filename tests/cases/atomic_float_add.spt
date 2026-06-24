@@ -1,0 +1,27 @@
+; Floating-point atomic add (OpAtomicFAddEXT, SPV_EXT_shader_atomic_float_add)
+; maps to atomic_add on a float/double pointer, enabled by cl_ext_float_atomics.
+; (No %clang run: stock clang's default target doesn't expose float atomics;
+; pocl, which advertises cl_ext_float_atomics, exercises this end to end.)
+; RUN: %spirv2clc --asm --spirv-version=1.4 %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability AtomicFloat32AddEXT
+               OpExtension "SPV_EXT_shader_atomic_float_add"
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+       %void = OpTypeVoid
+        %f32 = OpTypeFloat 32
+       %uint = OpTypeInt 32 0
+        %p_g = OpTypePointer CrossWorkgroup %f32
+      %scope = OpConstant %uint 1
+        %sem = OpConstant %uint 0
+        %one = OpConstant %f32 1
+       %fnty = OpTypeFunction %void %p_g
+          %k = OpFunction %void None %fnty
+        %ptr = OpFunctionParameter %p_g
+        %lbl = OpLabel
+        %old = OpAtomicFAddEXT %f32 %ptr %scope %sem %one
+               OpReturn
+               OpFunctionEnd
+; CHECK: #pragma OPENCL EXTENSION cl_ext_float_atomics : enable
+; CHECK: = atomic_add(

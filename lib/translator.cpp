@@ -178,6 +178,11 @@ bool translator::translate_capabilities() {
         return false;
       }
       break;
+    case SpvCapabilityAtomicFloat32AddEXT:
+    case SpvCapabilityAtomicFloat64AddEXT:
+      // Floating-point atomic add (atomic_add on float/double).
+      enable_extension("cl_ext_float_atomics");
+      break;
     default:
       std::cerr << "UNIMPLEMENTED capability " << cap << ".\n";
       return false;
@@ -187,11 +192,17 @@ bool translator::translate_capabilities() {
 }
 
 bool translator::translate_extensions() const {
+  // SPIR-V extensions we can honor; they need no emission of their own (the
+  // capabilities/instructions they enable are handled elsewhere).
+  static const std::unordered_set<std::string> handled = {
+      "SPV_KHR_no_integer_wrap_decoration",
+      "SPV_EXT_shader_atomic_float_add",
+  };
   for (auto &inst : m_ir->module()->extensions()) {
     assert(inst.opcode() == spv::Op::OpExtension);
     auto &op_ext = inst.GetOperand(0);
     auto ext = op_ext.AsString();
-    if (ext != "SPV_KHR_no_integer_wrap_decoration") {
+    if (!handled.count(ext)) {
       std::cerr << "UNIMPLEMENTED extension " << ext << ".\n";
       return false;
     }

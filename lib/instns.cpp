@@ -334,6 +334,7 @@ bool translator::translate_instruction(const Instruction &inst,
   case spv::Op::OpAtomicAnd:
   case spv::Op::OpAtomicExchange:
   case spv::Op::OpAtomicIAdd:
+  case spv::Op::OpAtomicFAddEXT:
   case spv::Op::OpAtomicISub:
   case spv::Op::OpAtomicOr:
   case spv::Op::OpAtomicSMax:
@@ -345,6 +346,7 @@ bool translator::translate_instruction(const Instruction &inst,
         {spv::Op::OpAtomicAnd, "and"},
         {spv::Op::OpAtomicExchange, "xchg"},
         {spv::Op::OpAtomicIAdd, "add"},
+        {spv::Op::OpAtomicFAddEXT, "add"},
         {spv::Op::OpAtomicISub, "sub"},
         {spv::Op::OpAtomicOr, "or"},
         {spv::Op::OpAtomicSMax, "max"},
