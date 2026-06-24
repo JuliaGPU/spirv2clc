@@ -477,6 +477,44 @@ bool translator::translate_types_values() {
       }
       break;
     }
+    case spv::Op::OpSpecConstantOp: {
+      // llvm-spirv folds constant-expression global initializers into an
+      // OpSpecConstantOp carrying an embedded sub-opcode (not runtime
+      // specialization). Lower the common pointer/cast forms into a literal.
+      auto subop = static_cast<spv::Op>(inst.GetSingleWordOperand(2));
+      switch (subop) {
+      case spv::Op::OpPtrCastToGeneric:
+      case spv::Op::OpGenericCastToPtr:
+      case spv::Op::OpBitcast:
+      case spv::Op::OpConvertUToPtr:
+      case spv::Op::OpConvertPtrToU: {
+        // The result type already carries the destination type/address space.
+        m_literals[result] = src_cast(rtype, inst.GetSingleWordOperand(3));
+        break;
+      }
+      case spv::Op::OpPtrAccessChain:
+      case spv::Op::OpInBoundsPtrAccessChain: {
+        // Single-index element offset on a pointer: base + index. (Further
+        // struct/array indices are not produced by these constant initializers.)
+        if (inst.NumOperands() != 5) {
+          std::cerr << "UNIMPLEMENTED OpSpecConstantOp PtrAccessChain with "
+                       "multiple indices"
+                    << std::endl;
+          return false;
+        }
+        auto base = inst.GetSingleWordOperand(3);
+        auto index = inst.GetSingleWordOperand(4);
+        m_literals[result] = src_cast(
+            rtype, "(" + var_for(base) + " + " + var_for(index) + ")");
+        break;
+      }
+      default:
+        std::cerr << "UNIMPLEMENTED OpSpecConstantOp sub-opcode "
+                  << static_cast<uint32_t>(subop) << std::endl;
+        return false;
+      }
+      break;
+    }
     case spv::Op::OpVariable: {
       if (m_builtin_variables.count(result) != 0) {
         break;

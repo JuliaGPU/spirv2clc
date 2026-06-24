@@ -1,0 +1,28 @@
+; llvm-spirv folds a constant-expression global initializer (here an
+; addrspacecast of a null generic pointer to a global pointer) into an
+; OpSpecConstantOp carrying an embedded sub-opcode (GenericCastToPtr). It must
+; be lowered into a constant cast, not rejected. Program-scope globals are
+; OpenCL C 2.0+.
+; RUN: not %spirv2clc --asm --spirv-version=1.4 --cl-std=CL1.2 %s
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL2.0 %s | %FileCheck %s
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL2.0 %s | %clang -c -cl-std=CL2.0 -x cl - -o /dev/null
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability GenericPointer
+               OpCapability Int8
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k"
+       %void = OpTypeVoid
+      %uchar = OpTypeInt 8 0
+       %pgen = OpTypePointer Generic %uchar
+         %pg = OpTypePointer CrossWorkgroup %uchar
+        %ppg = OpTypePointer CrossWorkgroup %pg
+       %null = OpConstantNull %pgen
+      %ginit = OpSpecConstantOp %pg GenericCastToPtr %null
+          %g = OpVariable %ppg CrossWorkgroup %ginit
+       %fnty = OpTypeFunction %void
+          %k = OpFunction %void None %fnty
+         %bb = OpLabel
+               OpReturn
+               OpFunctionEnd
+; CHECK: global uchar global* {{[A-Za-z0-9_]+}} = ((uchar global*)((uchar generic*)0));
