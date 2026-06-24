@@ -1,0 +1,26 @@
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+; An OpPtrAccessChain element index is signed (Julia emits -1 to undo 1-based
+; indexing). Emitting it as the raw unsigned constant 0xFFFF... overflows the
+; pointer arithmetic (undefined behavior) and miscompiles on real drivers, so
+; the index must be cast to a signed type: &base[(long)(...)] is base - 1.
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Int8
+               OpCapability Int64
+               OpCapability Linkage
+               OpMemoryModel Physical64 OpenCL
+       %void = OpTypeVoid
+      %uchar = OpTypeInt 8 0
+      %ulong = OpTypeInt 64 0
+%ulong_minus1 = OpConstant %ulong 18446744073709551615
+     %puchar = OpTypePointer CrossWorkgroup %uchar
+       %fnty = OpTypeFunction %void %puchar
+         %fn = OpFunction %void None %fnty
+      %param = OpFunctionParameter %puchar
+        %lbl = OpLabel
+               ; step one element backward (1-based -> 0-based adjustment)
+        %nxt = OpPtrAccessChain %puchar %param %ulong_minus1
+               OpReturn
+               OpFunctionEnd
+; CHECK: = &{{v[0-9]+}}[(long)(

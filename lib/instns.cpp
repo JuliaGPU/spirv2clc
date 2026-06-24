@@ -7,9 +7,11 @@ bool translator::emit_access_chain(const Instruction &inst, bool ptr_variant,
   if (ptr_variant) {
     // The Ptr* variants take a leading Element index that does pointer
     // arithmetic on the base (scaled by the pointee size, which is correct now
-    // that pointer-to-array is a pointer-to-wrapper).
+    // that pointer-to-array is a pointer-to-wrapper). The index is signed, so
+    // emit it as such: a -1 here (1-based indexing) must subtract one element,
+    // not add 0xFFFF... and overflow the pointer.
     auto elem = inst.GetSingleWordOperand(3);
-    sval = "&" + var_for(base) + "[" + var_for(elem) + "]";
+    sval = "&" + var_for(base) + "[" + src_signed_index(elem) + "]";
     i = 4;
   } else {
     // The plain variants' first index walks into the pointee directly.

@@ -116,6 +116,12 @@ private:
                                const spvtools::opt::analysis::Type *ty,
                                uint32_t index) const;
 
+  // Render an access-chain index as a signed offset. SPIR-V/LLVM access-chain
+  // indices are signed (Julia emits -1 for 1-based-to-0-based pointer
+  // adjustment); emitting them as their raw unsigned value overflows the
+  // pointer arithmetic (undefined behavior) and miscompiles.
+  std::string src_signed_index(uint32_t index) const;
+
   bool emit_access_chain(const spvtools::opt::Instruction &inst,
                          bool ptr_variant, std::string &sval) const;
 

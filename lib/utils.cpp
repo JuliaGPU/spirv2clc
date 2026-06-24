@@ -67,10 +67,22 @@ translator::src_access_chain(const std::string &src_base,
   } else if (ty->kind() == spvtools::opt::analysis::Type::kArray) {
     // Arrays are struct-wrapped; index through the 'e' member. The base is
     // always a pointer expression here, so dereference with '->'.
-    return "&(" + ret + "->e[" + var_for(index) + "])";
+    return "&(" + ret + "->e[" + src_signed_index(index) + "])";
   } else {
     return "UNIMPLEMENTED";
   }
+}
+
+std::string translator::src_signed_index(uint32_t index) const {
+  // Match the index's own width so a negative bit pattern (e.g. a 32-bit
+  // 0xFFFFFFFF meaning -1) keeps its sign before promotion to the pointer's
+  // offset width; default to 64-bit for non-integer/unknown index types.
+  auto ty = type_for_val(index);
+  unsigned width = ty != nullptr && ty->kind() == Type::Kind::kInteger
+                       ? ty->AsInteger()->width()
+                       : 64;
+  const char *signed_ty = width <= 32 ? "int" : "long";
+  return std::string("(") + signed_ty + ")(" + var_for(index) + ")";
 }
 
 std::string
