@@ -79,9 +79,10 @@ private:
       return m_exports.at(id);
     } else if (m_imports.count(id)) {
       return m_imports.at(id);
-    } else if (m_names.count(id)) {
-      return m_names.at(id);
     } else if (m_builtin_values.count(id)) {
+      // Checked before m_names: a scalar built-in load (assign_result=false, so
+      // no declaration) renders as its builtin call even when codegen also gave
+      // the load result a name, which would otherwise be an undeclared use.
       switch (m_builtin_values.at(id)) {
       case SpvBuiltInWorkDim:
         return src_function_call("get_work_dim");
@@ -99,6 +100,8 @@ private:
         return note_unsupported("builtin value " +
                                 std::to_string(m_builtin_values.at(id)));
       }
+    } else if (m_names.count(id)) {
+      return m_names.at(id);
     } else {
       return "v" + std::to_string(id);
     }
