@@ -153,7 +153,6 @@ static std::unordered_map<OpenCLLIB::Entrypoints, const std::string>
         {OpenCLLIB::Half_sin, "half_sin"},
         {OpenCLLIB::Half_sqrt, "half_sqrt"},
         {OpenCLLIB::Half_tan, "half_tan"},
-        {OpenCLLIB::Ilogb, "ilogb"},
         {OpenCLLIB::Length, "length"},
         {OpenCLLIB::Lgamma, "lgamma"},
         {OpenCLLIB::Log, "log"},
@@ -204,6 +203,13 @@ bool translator::translate_extended_instruction(const Instruction &inst,
     sval = translate_extended_ternary(inst);
   } else {
     switch (instruction) {
+    case OpenCLLIB::Ilogb: {
+      // ilogb returns a signed intn; reinterpret to the (unsigned) result type
+      // so a vector assignment type-checks (uintN = intN is not implicit).
+      auto x = inst.GetSingleWordOperand(4);
+      sval = src_as(inst.type_id(), src_function_call("ilogb", x));
+      break;
+    }
     case OpenCLLIB::Vloadn: {
       auto offset = inst.GetSingleWordOperand(4);
       auto ptr = inst.GetSingleWordOperand(5);

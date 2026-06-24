@@ -1,0 +1,28 @@
+; ilogb returns a signed intn; spirv2clc declares the result variable with the
+; unsigned type, and uintN = intN is not an implicit vector conversion, so the
+; signed result must be reinterpreted to the result type.
+; RUN: %spirv2clc --asm --spirv-version=1.4 %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm --spirv-version=1.4 %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+        %ext = OpExtInstImport "OpenCL.std"
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+       %void = OpTypeVoid
+        %f32 = OpTypeFloat 32
+        %i32 = OpTypeInt 32 0
+        %v4f = OpTypeVector %f32 4
+        %v4i = OpTypeVector %i32 4
+      %p_g_f = OpTypePointer CrossWorkgroup %v4f
+      %p_g_i = OpTypePointer CrossWorkgroup %v4i
+       %fnty = OpTypeFunction %void %p_g_f %p_g_i
+          %k = OpFunction %void None %fnty
+        %inp = OpFunctionParameter %p_g_f
+        %out = OpFunctionParameter %p_g_i
+        %lbl = OpLabel
+          %x = OpLoad %v4f %inp
+          %r = OpExtInst %v4i %ext ilogb %x
+               OpStore %out %r
+               OpReturn
+               OpFunctionEnd
+; CHECK: = as_uint4(ilogb(
