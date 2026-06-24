@@ -1,0 +1,25 @@
+; NAN/INFINITY are float macros, so a double NaN/Inf constant must be cast to
+; double; otherwise a double-typed use is ambiguous against the float overloads
+; (clang: call to 'copysign' is ambiguous for copysign(double, NAN)).
+; RUN: %spirv2clc --asm --spirv-version=1.4 %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm --spirv-version=1.4 %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Float64
+        %ext = OpExtInstImport "OpenCL.std"
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+       %void = OpTypeVoid
+        %f64 = OpTypeFloat 64
+      %p_g_d = OpTypePointer CrossWorkgroup %f64
+       %zero = OpConstant %f64 0
+        %nan = OpConstant %f64 0x1.8p+1024
+       %fnty = OpTypeFunction %void %p_g_d
+          %k = OpFunction %void None %fnty
+        %out = OpFunctionParameter %p_g_d
+        %lbl = OpLabel
+          %r = OpExtInst %f64 %ext copysign %zero %nan
+               OpStore %out %r
+               OpReturn
+               OpFunctionEnd
+; CHECK: copysign({{.*}}, (double)NAN)

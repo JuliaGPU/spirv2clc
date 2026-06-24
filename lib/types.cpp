@@ -323,13 +323,16 @@ bool translator::translate_types_values() {
           uint64_t w1 = op_val.words[1];
           auto w = w1 << 32 | w0;
           double val = *reinterpret_cast<double *>(&w);
+          // NAN/INFINITY are float macros; cast to double so double-typed uses
+          // (e.g. copysign(0.0, (double)NAN)) aren't ambiguous against the float
+          // overloads.
           if (std::isinf(val)) {
             if (std::signbit(val)) {
               out << "-";
             }
-            out << "INFINITY";
+            out << "(double)INFINITY";
           } else if (std::isnan(val)) {
-            out << "NAN";
+            out << "(double)NAN";
           } else {
             out.precision(53);
             out << std::fixed << val;
