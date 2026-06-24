@@ -118,7 +118,11 @@ bool translator::translate_type(const Instruction &inst) {
     auto ctype = inst.GetSingleWordOperand(1);
     auto cnum = inst.GetSingleWordOperand(2);
     typestr = src_type(ctype) + std::to_string(cnum);
-    signedtypestr = src_type_signed(ctype) + std::to_string(cnum);
+    // Only integer element types have a signed counterpart; a float vector has
+    // no signed form (and asking for one would now fail the translation).
+    if (m_types_signed.count(ctype)) {
+      signedtypestr = src_type_signed(ctype) + std::to_string(cnum);
+    }
     break;
   }
   case spv::Op::OpTypeStruct: { // TODO support volatile members

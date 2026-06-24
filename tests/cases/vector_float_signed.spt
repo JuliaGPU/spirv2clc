@@ -1,0 +1,26 @@
+; A float vector type has no signed counterpart, so translating it must not try
+; to synthesize one (rootn's int-vector exponent still gets a signed cast).
+; RUN: %spirv2clc --asm --spirv-version=1.4 %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm --spirv-version=1.4 %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+        %ext = OpExtInstImport "OpenCL.std"
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+       %void = OpTypeVoid
+        %f32 = OpTypeFloat 32
+        %i32 = OpTypeInt 32 0
+        %v4f = OpTypeVector %f32 4
+       %v4iv = OpTypeVector %i32 4
+      %p_g_v = OpTypePointer CrossWorkgroup %v4f
+       %fnty = OpTypeFunction %void %p_g_v
+          %k = OpFunction %void None %fnty
+        %out = OpFunctionParameter %p_g_v
+        %lbl = OpLabel
+          %x = OpLoad %v4f %out
+          %n = OpUndef %v4iv
+          %r = OpExtInst %v4f %ext rootn %x %n
+               OpStore %out %r
+               OpReturn
+               OpFunctionEnd
+; CHECK: rootn({{.*}}, as_int4(
