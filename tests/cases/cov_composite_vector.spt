@@ -1,0 +1,44 @@
+; Vector composite ops: OpCompositeConstruct builds a vector, OpCompositeExtract
+; and OpVectorExtractDynamic read a component, OpCompositeInsert and
+; OpVectorInsertDynamic write one, and OpVectorShuffle reorders/selects across
+; two vectors.
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+     %v4uint = OpTypeVector %uint 4
+      %p_g_v = OpTypePointer CrossWorkgroup %v4uint
+     %uint_0 = OpConstant %uint 0
+     %uint_1 = OpConstant %uint 1
+     %uint_2 = OpConstant %uint 2
+     %uint_3 = OpConstant %uint 3
+       %fnty = OpTypeFunction %void %p_g_v
+          %k = OpFunction %void None %fnty
+        %out = OpFunctionParameter %p_g_v
+        %lbl = OpLabel
+          %v = OpLoad %v4uint %out
+; OpCompositeConstruct: assemble a vector from four scalars.
+       %made = OpCompositeConstruct %v4uint %uint_0 %uint_1 %uint_2 %uint_3
+; OpCompositeExtract: static index into a vector.
+        %e0 = OpCompositeExtract %uint %v 0
+; OpVectorExtractDynamic: runtime index into a vector.
+        %ed = OpVectorExtractDynamic %uint %v %e0
+; OpCompositeInsert: static-index write producing a new vector.
+        %ci = OpCompositeInsert %v4uint %ed %made 1
+; OpVectorInsertDynamic: runtime-index write producing a new vector.
+        %vi = OpVectorInsertDynamic %v4uint %ci %e0 %uint_2
+; OpVectorShuffle: pick components across %v and %vi.
+        %sh = OpVectorShuffle %v4uint %v %vi 0 5 2 7
+               OpStore %out %sh
+               OpReturn
+               OpFunctionEnd
+; CHECK: = {((uint)0), ((uint)1), ((uint)2), ((uint)3)};
+; CHECK: = {{.*}}.s0;
+; CHECK: = ((uint*)&{{.*}})[{{.*}}];
+; CHECK: {{.*}}.s1 = {{.*}};
+; CHECK: ((uint*)&{{.*}})[((uint)2)] = {{.*}};
+; CHECK: = (({{u?int4}})({{.*}}.s0, {{.*}}.s1, {{.*}}.s2, {{.*}}.s3));

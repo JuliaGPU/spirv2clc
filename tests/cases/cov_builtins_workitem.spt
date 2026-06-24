@@ -1,0 +1,62 @@
+; The seven uint3 work-item builtin variables arrive as an Input OpVariable
+; decorated BuiltIn; loading the whole vector then OpCompositeExtract'ing a
+; component lowers to the matching get_*() query with the component index.
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k" %gid %goff %gsz %wid %wsz %lid %nwg
+               OpDecorate %gid BuiltIn GlobalInvocationId
+               OpDecorate %goff BuiltIn GlobalOffset
+               OpDecorate %gsz BuiltIn GlobalSize
+               OpDecorate %wid BuiltIn WorkgroupId
+               OpDecorate %wsz BuiltIn WorkgroupSize
+               OpDecorate %lid BuiltIn LocalInvocationId
+               OpDecorate %nwg BuiltIn NumWorkgroups
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+     %uint3 = OpTypeVector %uint 3
+   %p_in_v3 = OpTypePointer Input %uint3
+   %p_g_uint = OpTypePointer CrossWorkgroup %uint
+        %gid = OpVariable %p_in_v3 Input
+       %goff = OpVariable %p_in_v3 Input
+        %gsz = OpVariable %p_in_v3 Input
+        %wid = OpVariable %p_in_v3 Input
+        %wsz = OpVariable %p_in_v3 Input
+        %lid = OpVariable %p_in_v3 Input
+        %nwg = OpVariable %p_in_v3 Input
+       %fnty = OpTypeFunction %void %p_g_uint
+          %k = OpFunction %void None %fnty
+        %out = OpFunctionParameter %p_g_uint
+        %lbl = OpLabel
+       %vgid = OpLoad %uint3 %gid
+       %egid = OpCompositeExtract %uint %vgid 0
+      %vgoff = OpLoad %uint3 %goff
+      %egoff = OpCompositeExtract %uint %vgoff 0
+       %vgsz = OpLoad %uint3 %gsz
+       %egsz = OpCompositeExtract %uint %vgsz 1
+       %vwid = OpLoad %uint3 %wid
+       %ewid = OpCompositeExtract %uint %vwid 0
+       %vwsz = OpLoad %uint3 %wsz
+       %ewsz = OpCompositeExtract %uint %vwsz 1
+       %vlid = OpLoad %uint3 %lid
+       %elid = OpCompositeExtract %uint %vlid 2
+       %vnwg = OpLoad %uint3 %nwg
+       %enwg = OpCompositeExtract %uint %vnwg 0
+         %s1 = OpIAdd %uint %egid %egoff
+         %s2 = OpIAdd %uint %s1 %egsz
+         %s3 = OpIAdd %uint %s2 %ewid
+         %s4 = OpIAdd %uint %s3 %ewsz
+         %s5 = OpIAdd %uint %s4 %elid
+         %s6 = OpIAdd %uint %s5 %enwg
+               OpStore %out %s6
+               OpReturn
+               OpFunctionEnd
+; CHECK-DAG: get_global_id(0)
+; CHECK-DAG: get_global_offset(0)
+; CHECK-DAG: get_global_size(1)
+; CHECK-DAG: get_group_id(0)
+; CHECK-DAG: get_local_size(1)
+; CHECK-DAG: get_local_id(2)
+; CHECK-DAG: get_num_groups(0)

@@ -1,0 +1,34 @@
+; Signed integer ops reinterpret their unsigned-typed operands as signed:
+; OpSDiv/OpSRem/OpShiftRightArithmetic (binary), OpSNegate/OpNot (unary).
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Linkage
+               OpMemoryModel Physical64 OpenCL
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+      %p_g_u = OpTypePointer CrossWorkgroup %uint
+       %fnty = OpTypeFunction %void %uint %uint %p_g_u
+         %fn = OpFunction %void None %fnty
+          %a = OpFunctionParameter %uint
+          %b = OpFunctionParameter %uint
+        %out = OpFunctionParameter %p_g_u
+        %lbl = OpLabel
+       %quot = OpSDiv %uint %a %b
+        %rem = OpSRem %uint %a %b
+        %sar = OpShiftRightArithmetic %uint %a %b
+        %neg = OpSNegate %uint %a
+        %not = OpNot %uint %a
+               OpStore %out %quot
+               OpStore %out %rem
+               OpStore %out %sar
+               OpStore %out %neg
+               OpStore %out %not
+               OpReturn
+               OpFunctionEnd
+; CHECK: as_uint(as_int(v6) / as_int(v7))
+; CHECK: as_uint(as_int(v6) % as_int(v7))
+; CHECK: as_uint(as_int(v6) >> as_int(v7))
+; CHECK: = -v6;
+; CHECK: = ~v6;

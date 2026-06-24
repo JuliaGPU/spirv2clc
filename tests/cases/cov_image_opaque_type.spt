@@ -1,0 +1,19 @@
+; OpTypeOpaque -> a forward `struct <name>;` declaration, usable through a
+; pointer parameter (the opaque type itself is never completed).
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Linkage
+               OpMemoryModel Physical64 OpenCL
+       %void = OpTypeVoid
+        %opa = OpTypeOpaque "MyStruct"
+      %p_opa = OpTypePointer CrossWorkgroup %opa
+       %fnty = OpTypeFunction %void %p_opa
+          %f = OpFunction %void None %fnty
+        %arg = OpFunctionParameter %p_opa
+        %lbl = OpLabel
+               OpReturn
+               OpFunctionEnd
+; CHECK: struct MyStruct;
+; CHECK: struct MyStruct global*

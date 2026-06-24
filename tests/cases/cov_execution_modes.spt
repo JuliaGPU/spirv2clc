@@ -1,0 +1,18 @@
+; LocalSize becomes the reqd_work_group_size kernel attribute and ContractionOff
+; becomes a #pragma OPENCL FP_CONTRACT OFF ahead of the kernel.
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k"
+               OpExecutionMode %k LocalSize 8 8 1
+               OpExecutionMode %k ContractionOff
+       %void = OpTypeVoid
+       %fnty = OpTypeFunction %void
+          %k = OpFunction %void None %fnty
+         %bb = OpLabel
+               OpReturn
+               OpFunctionEnd
+; CHECK: #pragma OPENCL FP_CONTRACT OFF
+; CHECK: kernel __attribute((reqd_work_group_size(8,8,1))) k(

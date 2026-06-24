@@ -1,0 +1,34 @@
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+; OpLifetimeStart / OpLifetimeStop bracket the live range of a function-local
+; OpVariable. They carry no semantics in OpenCL C and the translator drops them,
+; so the variable's storage and the surrounding stores/loads are all that
+; remain in the output.
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Linkage
+               OpMemoryModel Physical64 OpenCL
+               OpName %tmp "tmp"
+               OpName %v "v"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+      %p_fn  = OpTypePointer Function %uint
+      %p_out = OpTypePointer CrossWorkgroup %uint
+       %fnty = OpTypeFunction %void %uint %p_out
+         %fn = OpFunction %void None %fnty
+          %v = OpFunctionParameter %uint
+        %out = OpFunctionParameter %p_out
+        %lbl = OpLabel
+        %tmp = OpVariable %p_fn Function
+               OpLifetimeStart %tmp 0
+               OpStore %tmp %v
+          %r = OpLoad %uint %tmp
+               OpLifetimeStop %tmp 0
+               OpStore %out %r
+               OpReturn
+               OpFunctionEnd
+; CHECK: uint tmp_storage;
+; CHECK: *tmp = v;
+; CHECK: = *tmp;
+; CHECK-NOT: Lifetime
+; CHECK-NOT: UNIMPLEMENTED

@@ -1,0 +1,23 @@
+; OpAtomicIIncrement / OpAtomicIDecrement lower to the legacy atomic_inc /
+; atomic_dec builtins (atom_* for 64-bit operands).
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+         %pg = OpTypePointer CrossWorkgroup %uint
+      %scope = OpConstant %uint 1
+        %sem = OpConstant %uint 0
+       %fnty = OpTypeFunction %void %pg
+          %k = OpFunction %void None %fnty
+          %p = OpFunctionParameter %pg
+        %lbl = OpLabel
+        %inc = OpAtomicIIncrement %uint %p %scope %sem
+        %dec = OpAtomicIDecrement %uint %p %scope %sem
+               OpReturn
+               OpFunctionEnd
+; CHECK: = atomic_inc(
+; CHECK: = atomic_dec(

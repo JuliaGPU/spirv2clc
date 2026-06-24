@@ -1,0 +1,20 @@
+; OpBitCount lowers to popcount().
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Linkage
+               OpMemoryModel Physical64 OpenCL
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+      %p_g_u = OpTypePointer CrossWorkgroup %uint
+       %fnty = OpTypeFunction %void %uint %p_g_u
+         %fn = OpFunction %void None %fnty
+          %a = OpFunctionParameter %uint
+        %out = OpFunctionParameter %p_g_u
+        %lbl = OpLabel
+        %pop = OpBitCount %uint %a
+               OpStore %out %pop
+               OpReturn
+               OpFunctionEnd
+; CHECK: = popcount(

@@ -1,0 +1,23 @@
+; WorkDim is a scalar builtin variable: loading it directly (no component
+; extract) yields the get_work_dim() query.
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k" %wd
+               OpDecorate %wd BuiltIn WorkDim
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+  %p_in_uint = OpTypePointer Input %uint
+   %p_g_uint = OpTypePointer CrossWorkgroup %uint
+         %wd = OpVariable %p_in_uint Input
+       %fnty = OpTypeFunction %void %p_g_uint
+          %k = OpFunction %void None %fnty
+        %out = OpFunctionParameter %p_g_uint
+        %lbl = OpLabel
+        %val = OpLoad %uint %wd
+               OpStore %out %val
+               OpReturn
+               OpFunctionEnd
+; CHECK: get_work_dim()

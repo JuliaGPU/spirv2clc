@@ -1,0 +1,51 @@
+; Three-operand OpenCL.std extended instructions (translate_extended_ternary).
+; Signed variants (s_clamp) reinterpret their operands via as_int / as_uint.
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+        %ext = OpExtInstImport "OpenCL.std"
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+       %void = OpTypeVoid
+        %f32 = OpTypeFloat 32
+        %i32 = OpTypeInt 32 0
+    %p_g_f32 = OpTypePointer CrossWorkgroup %f32
+    %p_g_i32 = OpTypePointer CrossWorkgroup %i32
+       %fnty = OpTypeFunction %void %p_g_f32 %p_g_i32 %f32 %f32 %f32 %i32 %i32 %i32
+          %k = OpFunction %void None %fnty
+       %outf = OpFunctionParameter %p_g_f32
+       %outi = OpFunctionParameter %p_g_i32
+          %a = OpFunctionParameter %f32
+          %b = OpFunctionParameter %f32
+          %c = OpFunctionParameter %f32
+         %ia = OpFunctionParameter %i32
+         %ib = OpFunctionParameter %i32
+         %ic = OpFunctionParameter %i32
+        %lbl = OpLabel
+        %fcl = OpExtInst %f32 %ext fclamp %a %b %c
+        %scl = OpExtInst %i32 %ext s_clamp %ia %ib %ic
+        %fma = OpExtInst %f32 %ext fma %a %b %c
+        %mad = OpExtInst %f32 %ext mad %a %b %c
+        %mix = OpExtInst %f32 %ext mix %a %b %c
+        %bse = OpExtInst %i32 %ext bitselect %ia %ib %ic
+        %sel = OpExtInst %i32 %ext select %ia %ib %ic
+        %sst = OpExtInst %f32 %ext smoothstep %a %b %c
+         %s1 = OpFAdd %f32 %fcl %fma
+         %s2 = OpFAdd %f32 %s1 %mad
+         %s3 = OpFAdd %f32 %s2 %mix
+         %s4 = OpFAdd %f32 %s3 %sst
+               OpStore %outf %s4
+         %i1 = OpIAdd %i32 %scl %bse
+         %i2 = OpIAdd %i32 %i1 %sel
+               OpStore %outi %i2
+               OpReturn
+               OpFunctionEnd
+; CHECK-DAG: = clamp({{v[0-9]+}}, {{v[0-9]+}}, {{v[0-9]+}});
+; CHECK-DAG: = as_uint(clamp(as_int({{v[0-9]+}}), as_int({{v[0-9]+}}), as_int({{v[0-9]+}})));
+; CHECK-DAG: = fma(
+; CHECK-DAG: = mad(
+; CHECK-DAG: = mix(
+; CHECK-DAG: = bitselect(
+; CHECK-DAG: = select(
+; CHECK-DAG: = smoothstep(

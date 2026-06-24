@@ -1,0 +1,33 @@
+; OpFMod/OpFRem lower to fmod; OpFNegate negates; OpDot is dot().
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Linkage
+               OpMemoryModel Physical64 OpenCL
+       %void = OpTypeVoid
+        %f32 = OpTypeFloat 32
+     %v4float = OpTypeVector %f32 4
+      %p_g_f = OpTypePointer CrossWorkgroup %f32
+       %fnty = OpTypeFunction %void %f32 %f32 %v4float %v4float %p_g_f
+         %fn = OpFunction %void None %fnty
+          %a = OpFunctionParameter %f32
+          %b = OpFunctionParameter %f32
+          %u = OpFunctionParameter %v4float
+          %v = OpFunctionParameter %v4float
+        %out = OpFunctionParameter %p_g_f
+        %lbl = OpLabel
+        %mod = OpFMod %f32 %a %b
+        %rem = OpFRem %f32 %a %b
+        %neg = OpFNegate %f32 %a
+        %dot = OpDot %f32 %u %v
+        %s01 = OpFAdd %f32 %mod %rem
+        %s23 = OpFAdd %f32 %neg %dot
+        %sum = OpFAdd %f32 %s01 %s23
+               OpStore %out %sum
+               OpReturn
+               OpFunctionEnd
+; CHECK: fmod(
+; CHECK: fmod(
+; CHECK: = -
+; CHECK: dot(

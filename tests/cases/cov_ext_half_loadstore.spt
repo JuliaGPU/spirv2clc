@@ -1,0 +1,48 @@
+; half-precision memory access: vload(a)_half(n) reads half storage into float,
+; vstore(a)_half(n)[_r] writes float into half storage. The _r forms append the
+; FPRoundingMode (RTE -> rte, RTZ -> rtz) to the builtin name.
+; RUN: %spirv2clc --asm --spirv-version=1.4 %s | %clang -c -cl-std=CL3.0 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm --spirv-version=1.4 %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Int64
+               OpCapability Float16
+        %ext = OpExtInstImport "OpenCL.std"
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+       %void = OpTypeVoid
+       %half = OpTypeFloat 16
+        %f32 = OpTypeFloat 32
+        %i64 = OpTypeInt 64 0
+        %v4f = OpTypeVector %f32 4
+   %p_g_half = OpTypePointer CrossWorkgroup %half
+    %p_g_f32 = OpTypePointer CrossWorkgroup %f32
+        %off = OpConstant %i64 0
+       %fnty = OpTypeFunction %void %p_g_half %p_g_f32 %f32
+          %k = OpFunction %void None %fnty
+       %hptr = OpFunctionParameter %p_g_half
+        %out = OpFunctionParameter %p_g_f32
+          %s = OpFunctionParameter %f32
+        %lbl = OpLabel
+         %ld = OpExtInst %f32 %ext vload_half %off %hptr
+        %ldn = OpExtInst %v4f %ext vload_halfn %off %hptr 4
+        %lda = OpExtInst %v4f %ext vloada_halfn %off %hptr 4
+       %sumv = OpFAdd %v4f %ldn %lda
+       %sum0 = OpCompositeExtract %f32 %sumv 0
+        %tot = OpFAdd %f32 %ld %sum0
+               OpStore %out %tot
+         %vs = OpExtInst %void %ext vstore_half %s %off %hptr
+        %vsr = OpExtInst %void %ext vstore_half_r %s %off %hptr RTE
+        %vsn = OpExtInst %void %ext vstore_halfn %sumv %off %hptr
+        %vsa = OpExtInst %void %ext vstorea_halfn %sumv %off %hptr
+       %vsar = OpExtInst %void %ext vstorea_halfn_r %sumv %off %hptr RTZ
+               OpReturn
+               OpFunctionEnd
+; CHECK: = vload_half(((ulong)0), {{v[0-9]+}});
+; CHECK: = vload_half4(((ulong)0), {{v[0-9]+}});
+; CHECK: = vloada_half4(((ulong)0), {{v[0-9]+}});
+; CHECK: vstore_half({{v[0-9]+}}, ((ulong)0), {{v[0-9]+}});
+; CHECK: vstore_half_rte({{v[0-9]+}}, ((ulong)0), {{v[0-9]+}});
+; CHECK: vstore_half4({{v[0-9]+}}, ((ulong)0), {{v[0-9]+}});
+; CHECK: vstorea_half4({{v[0-9]+}}, ((ulong)0), {{v[0-9]+}});
+; CHECK: vstorea_half4_rtz({{v[0-9]+}}, ((ulong)0), {{v[0-9]+}});

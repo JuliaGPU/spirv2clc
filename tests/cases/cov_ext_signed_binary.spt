@@ -1,0 +1,36 @@
+; Signed integer OpenCL.std builtins reinterpret their (unsigned) operands and
+; result through as_int / as_uint (src_function_call_signed wrapped in src_as).
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+        %ext = OpExtInstImport "OpenCL.std"
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+       %void = OpTypeVoid
+        %i32 = OpTypeInt 32 0
+    %p_g_i32 = OpTypePointer CrossWorkgroup %i32
+       %fnty = OpTypeFunction %void %p_g_i32 %i32 %i32 %i32
+          %k = OpFunction %void None %fnty
+        %out = OpFunctionParameter %p_g_i32
+          %x = OpFunctionParameter %i32
+          %y = OpFunctionParameter %i32
+          %z = OpFunctionParameter %i32
+        %lbl = OpLabel
+         %mh = OpExtInst %i32 %ext s_mul_hi %x %y
+         %ha = OpExtInst %i32 %ext s_hadd %x %y
+         %rh = OpExtInst %i32 %ext s_rhadd %x %y
+        %m24 = OpExtInst %i32 %ext s_mul24 %x %y
+       %ma24 = OpExtInst %i32 %ext s_mad24 %x %y %z
+         %r1 = OpIAdd %i32 %mh %ha
+         %r2 = OpIAdd %i32 %r1 %rh
+         %r3 = OpIAdd %i32 %r2 %m24
+         %r4 = OpIAdd %i32 %r3 %ma24
+               OpStore %out %r4
+               OpReturn
+               OpFunctionEnd
+; CHECK-DAG: = as_uint(mul_hi(as_int({{v[0-9]+}}), as_int({{v[0-9]+}})));
+; CHECK-DAG: = as_uint(hadd(as_int({{v[0-9]+}}), as_int({{v[0-9]+}})));
+; CHECK-DAG: = as_uint(rhadd(as_int({{v[0-9]+}}), as_int({{v[0-9]+}})));
+; CHECK-DAG: = as_uint(mul24(as_int({{v[0-9]+}}), as_int({{v[0-9]+}})));
+; CHECK-DAG: = as_uint(mad24(as_int({{v[0-9]+}}), as_int({{v[0-9]+}}), as_int({{v[0-9]+}})));

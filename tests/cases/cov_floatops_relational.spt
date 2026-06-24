@@ -1,0 +1,53 @@
+; Relational/logical ops with bool results, consumed via OpSelect:
+; OpOrdered/OpUnordered/OpLessOrGreater, OpLogicalNot, and OpAny/OpAll over a
+; bool vector produced by a vector compare.
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Linkage
+               OpMemoryModel Physical64 OpenCL
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+        %f32 = OpTypeFloat 32
+       %bool = OpTypeBool
+     %v4float = OpTypeVector %f32 4
+      %v4bool = OpTypeVector %bool 4
+      %p_g_u = OpTypePointer CrossWorkgroup %uint
+       %zero = OpConstant %uint 0
+        %one = OpConstant %uint 1
+       %fnty = OpTypeFunction %void %f32 %f32 %v4float %v4float %p_g_u
+         %fn = OpFunction %void None %fnty
+          %a = OpFunctionParameter %f32
+          %b = OpFunctionParameter %f32
+          %u = OpFunctionParameter %v4float
+          %v = OpFunctionParameter %v4float
+        %out = OpFunctionParameter %p_g_u
+        %lbl = OpLabel
+        %ord = OpOrdered %bool %a %b
+        %uno = OpUnordered %bool %a %b
+        %log = OpLessOrGreater %bool %a %b
+        %not = OpLogicalNot %bool %ord
+        %vlt = OpFOrdLessThan %v4bool %u %v
+        %any = OpAny %bool %vlt
+        %all = OpAll %bool %vlt
+        %r0 = OpSelect %uint %ord %one %zero
+        %r1 = OpSelect %uint %uno %one %zero
+        %r2 = OpSelect %uint %log %one %zero
+        %r3 = OpSelect %uint %not %one %zero
+        %r4 = OpSelect %uint %any %one %zero
+        %r5 = OpSelect %uint %all %one %zero
+       %a01 = OpIAdd %uint %r0 %r1
+       %a23 = OpIAdd %uint %r2 %r3
+       %a45 = OpIAdd %uint %r4 %r5
+       %a03 = OpIAdd %uint %a01 %a23
+       %sum = OpIAdd %uint %a03 %a45
+               OpStore %out %sum
+               OpReturn
+               OpFunctionEnd
+; CHECK: isordered(
+; CHECK: isunordered(
+; CHECK: islessgreater(
+; CHECK: = !
+; CHECK: any(
+; CHECK: all(

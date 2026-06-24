@@ -1,0 +1,36 @@
+; OpSampledImage + OpImageSampleExplicitLod (Lod=0) -> read_image*(img, sampler,
+; coord). The translator keys the float/int builtin off the (vector) result
+; type's kind, so a vector result takes the integer path: as_uint4(read_imagei).
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability ImageBasic
+               OpCapability LiteralSampler
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+      %float = OpTypeFloat 32
+        %v2u = OpTypeVector %uint 2
+        %v4u = OpTypeVector %uint 4
+        %img = OpTypeImage %void 2D 0 0 0 0 Unknown ReadOnly
+       %simg = OpTypeSampledImage %img
+        %smp = OpTypeSampler
+    %p_g_v4u = OpTypePointer CrossWorkgroup %v4u
+         %c0 = OpConstant %uint 0
+      %fzero = OpConstant %float 0
+      %coord = OpConstantComposite %v2u %c0 %c0
+       %fnty = OpTypeFunction %void %img %smp %p_g_v4u
+          %k = OpFunction %void None %fnty
+       %imgp = OpFunctionParameter %img
+       %smpp = OpFunctionParameter %smp
+        %out = OpFunctionParameter %p_g_v4u
+        %lbl = OpLabel
+         %si = OpSampledImage %simg %imgp %smpp
+        %tex = OpImageSampleExplicitLod %v4u %si %coord Lod %fzero
+               OpStore %out %tex
+               OpReturn
+               OpFunctionEnd
+; CHECK: void kernel k(read_only image2d_t {{[^,]+}}, sampler_t {{.*}})
+; CHECK: as_uint4(read_imagei({{.*}}, {{.*}}, as_int2(

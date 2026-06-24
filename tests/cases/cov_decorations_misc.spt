@@ -1,0 +1,36 @@
+; Assorted decorations: Volatile (-> volatile), Alignment (-> aligned(N)),
+; SaturatedConversion (-> convert_*_sat), and NoSignedWrap (no output, just
+; accepted) are honored rather than rejected.
+; RUN: %spirv2clc --asm --spirv-version=1.4 %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm --spirv-version=1.4 %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k"
+               OpDecorate %a Volatile
+               OpDecorate %v Alignment 16
+               OpDecorate %sat SaturatedConversion
+               OpDecorate %nsw NoSignedWrap
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+        %f32 = OpTypeFloat 32
+      %p_g_u = OpTypePointer CrossWorkgroup %uint
+      %p_g_f = OpTypePointer CrossWorkgroup %f32
+      %p_f_u = OpTypePointer Function %uint
+       %fnty = OpTypeFunction %void %p_g_u %p_g_f
+          %k = OpFunction %void None %fnty
+          %a = OpFunctionParameter %p_g_u
+          %c = OpFunctionParameter %p_g_f
+        %lbl = OpLabel
+          %v = OpVariable %p_f_u Function
+       %fval = OpLoad %f32 %c
+        %sat = OpConvertFToU %uint %fval
+          %x = OpLoad %uint %a
+        %nsw = OpIAdd %uint %x %x
+               OpStore %v %nsw
+               OpStore %a %sat
+               OpReturn
+               OpFunctionEnd
+; CHECK-DAG: volatile
+; CHECK-DAG: aligned(16)
+; CHECK-DAG: convert_uint_sat

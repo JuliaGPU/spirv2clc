@@ -1,0 +1,49 @@
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+; OpSwitch with a default and two (literal,label) cases, gated by an
+; OpSelectionMerge. The translator emits a C switch whose cases/default are all
+; goto into the case blocks, which converge on the merge block.
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Linkage
+               OpMemoryModel Physical64 OpenCL
+               OpName %entry "entry"
+               OpName %def "def"
+               OpName %caseA "caseA"
+               OpName %caseB "caseB"
+               OpName %merge "merge"
+               OpName %res "res"
+               OpName %sel "sel"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+      %p_out = OpTypePointer CrossWorkgroup %uint
+        %c10 = OpConstant %uint 10
+        %c20 = OpConstant %uint 20
+        %c30 = OpConstant %uint 30
+       %fnty = OpTypeFunction %void %uint %p_out
+         %fn = OpFunction %void None %fnty
+        %sel = OpFunctionParameter %uint
+        %out = OpFunctionParameter %p_out
+      %entry = OpLabel
+               OpSelectionMerge %merge None
+               OpSwitch %sel %def 0 %caseA 1 %caseB
+      %caseA = OpLabel
+               OpBranch %merge
+      %caseB = OpLabel
+               OpBranch %merge
+        %def = OpLabel
+               OpBranch %merge
+      %merge = OpLabel
+        %res = OpPhi %uint %c10 %caseA %c20 %caseB %c30 %def
+               OpStore %out %res
+               OpReturn
+               OpFunctionEnd
+; CHECK: entry:
+; CHECK: switch (sel){default: goto def;case 0: goto caseA;case 1: goto caseB;}
+; CHECK: caseA:
+; CHECK: res = ((uint)10);
+; CHECK: caseB:
+; CHECK: res = ((uint)20);
+; CHECK: def:
+; CHECK: res = ((uint)30);
+; CHECK: merge:

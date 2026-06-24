@@ -1,0 +1,19 @@
+; OpSource and OpString carry debug provenance only; they must be accepted and
+; dropped, leaving a normal kernel and no stray source/string text in the output.
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k"
+          %s = OpString "kernel.cl"
+               OpSource OpenCL_C 120
+       %void = OpTypeVoid
+       %fnty = OpTypeFunction %void
+          %k = OpFunction %void None %fnty
+         %bb = OpLabel
+               OpReturn
+               OpFunctionEnd
+; CHECK: kernel k(
+; CHECK-NOT: kernel.cl
+; CHECK-NOT: OpSource

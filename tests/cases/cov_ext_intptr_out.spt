@@ -1,0 +1,32 @@
+; frexp / lgamma_r / remquo write a signed integer through a pointer argument;
+; the pointer operand is cast to the matching signed pointer type.
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+        %ext = OpExtInstImport "OpenCL.std"
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+       %void = OpTypeVoid
+        %f32 = OpTypeFloat 32
+        %i32 = OpTypeInt 32 0
+    %p_g_f32 = OpTypePointer CrossWorkgroup %f32
+    %p_g_i32 = OpTypePointer CrossWorkgroup %i32
+       %fnty = OpTypeFunction %void %p_g_f32 %p_g_i32 %f32 %f32
+          %k = OpFunction %void None %fnty
+        %out = OpFunctionParameter %p_g_f32
+       %iout = OpFunctionParameter %p_g_i32
+          %x = OpFunctionParameter %f32
+          %y = OpFunctionParameter %f32
+        %lbl = OpLabel
+         %fr = OpExtInst %f32 %ext frexp %x %iout
+         %lg = OpExtInst %f32 %ext lgamma_r %x %iout
+         %rq = OpExtInst %f32 %ext remquo %x %y %iout
+         %s1 = OpFAdd %f32 %fr %lg
+         %s2 = OpFAdd %f32 %s1 %rq
+               OpStore %out %s2
+               OpReturn
+               OpFunctionEnd
+; CHECK-DAG: = frexp({{v[0-9]+}}, ((int global*){{v[0-9]+}}));
+; CHECK-DAG: = lgamma_r({{v[0-9]+}}, ((int global*){{v[0-9]+}}));
+; CHECK-DAG: = remquo({{v[0-9]+}}, {{v[0-9]+}}, ((int global*){{v[0-9]+}}));

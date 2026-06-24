@@ -1,0 +1,49 @@
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+; Structured if/else diamond: OpBranchConditional + OpSelectionMerge + OpBranch
+; into a merge block whose value is an OpPhi. The translator lowers blocks to
+; labels with goto and materialises the phi as a predeclared variable assigned
+; in each predecessor.
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Linkage
+               OpMemoryModel Physical64 OpenCL
+               OpName %entry "entry"
+               OpName %then "then"
+               OpName %els "els"
+               OpName %merge "merge"
+               OpName %res "res"
+               OpName %cond "cond"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+       %bool = OpTypeBool
+      %p_out = OpTypePointer CrossWorkgroup %uint
+        %one = OpConstant %uint 1
+        %two = OpConstant %uint 2
+       %fnty = OpTypeFunction %void %uint %p_out
+         %fn = OpFunction %void None %fnty
+          %c = OpFunctionParameter %uint
+        %out = OpFunctionParameter %p_out
+      %entry = OpLabel
+       %cond = OpINotEqual %bool %c %one
+               OpSelectionMerge %merge None
+               OpBranchConditional %cond %then %els
+       %then = OpLabel
+               OpBranch %merge
+        %els = OpLabel
+               OpBranch %merge
+      %merge = OpLabel
+        %res = OpPhi %uint %one %then %two %els
+               OpStore %out %res
+               OpReturn
+               OpFunctionEnd
+; CHECK: uint res;
+; CHECK: entry:
+; CHECK: if (cond) { goto then;} else { goto els;}
+; CHECK: then:
+; CHECK: res = ((uint)1);
+; CHECK: goto merge;
+; CHECK: els:
+; CHECK: res = ((uint)2);
+; CHECK: goto merge;
+; CHECK: merge:

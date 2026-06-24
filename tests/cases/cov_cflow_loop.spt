@@ -1,0 +1,56 @@
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+; Counted loop: OpLoopMerge marks the loop, the latch's OpBranchConditional is
+; the back-edge, and the induction variable flows through an OpPhi (entry value
+; vs. updated value). Merges are no-ops; the loop becomes labels + goto.
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Linkage
+               OpMemoryModel Physical64 OpenCL
+               OpName %entry "entry"
+               OpName %header "header"
+               OpName %body "body"
+               OpName %latch "latch"
+               OpName %exit "exit"
+               OpName %iv "iv"
+               OpName %next "next"
+               OpName %cmp "cmp"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+       %bool = OpTypeBool
+      %p_out = OpTypePointer CrossWorkgroup %uint
+       %zero = OpConstant %uint 0
+        %one = OpConstant %uint 1
+       %fnty = OpTypeFunction %void %uint %p_out
+         %fn = OpFunction %void None %fnty
+          %n = OpFunctionParameter %uint
+        %out = OpFunctionParameter %p_out
+      %entry = OpLabel
+               OpBranch %header
+     %header = OpLabel
+         %iv = OpPhi %uint %zero %entry %next %latch
+               OpLoopMerge %exit %latch None
+               OpBranch %body
+       %body = OpLabel
+        %cmp = OpULessThan %bool %iv %n
+               OpBranchConditional %cmp %latch %exit
+      %latch = OpLabel
+       %next = OpIAdd %uint %iv %one
+               OpBranch %header
+       %exit = OpLabel
+               OpStore %out %iv
+               OpReturn
+               OpFunctionEnd
+; CHECK: uint iv;
+; CHECK: entry:
+; CHECK: iv = ((uint)0);
+; CHECK: goto header;
+; CHECK: header:
+; CHECK: goto body;
+; CHECK: body:
+; CHECK: if (cmp) { goto latch;} else { goto exit;}
+; CHECK: latch:
+; CHECK: uint next = iv + ((uint)1);
+; CHECK: iv = next;
+; CHECK: goto header;
+; CHECK: exit:

@@ -1,0 +1,26 @@
+; s_abs / s_abs_diff take signed operands (wrapped in as_int) but return an
+; unsigned magnitude, so the call is not re-wrapped in as_uint.
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+        %ext = OpExtInstImport "OpenCL.std"
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+       %void = OpTypeVoid
+        %i32 = OpTypeInt 32 0
+    %p_g_i32 = OpTypePointer CrossWorkgroup %i32
+       %fnty = OpTypeFunction %void %p_g_i32 %i32 %i32
+          %k = OpFunction %void None %fnty
+        %out = OpFunctionParameter %p_g_i32
+          %x = OpFunctionParameter %i32
+          %y = OpFunctionParameter %i32
+        %lbl = OpLabel
+         %ab = OpExtInst %i32 %ext s_abs %x
+         %ad = OpExtInst %i32 %ext s_abs_diff %x %y
+         %r1 = OpIAdd %i32 %ab %ad
+               OpStore %out %r1
+               OpReturn
+               OpFunctionEnd
+; CHECK-DAG: = abs(as_int({{v[0-9]+}}));
+; CHECK-DAG: = abs_diff(as_int({{v[0-9]+}}), as_int({{v[0-9]+}}));

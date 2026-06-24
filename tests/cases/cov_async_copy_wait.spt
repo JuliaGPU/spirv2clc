@@ -1,0 +1,36 @@
+; OpGroupAsyncCopy (stride 1) -> async_work_group_copy; the returned event is
+; stored to a local event_t and OpGroupWaitEvents -> wait_group_events.
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+      %event = OpTypeEvent
+       %p_ev = OpTypePointer Function %event
+       %p_gl = OpTypePointer CrossWorkgroup %uint
+       %p_lo = OpTypePointer Workgroup %uint
+      %scope = OpConstant %uint 2
+        %sem = OpConstant %uint 0
+          %n = OpConstant %uint 16
+     %stride = OpConstant %uint 1
+        %one = OpConstant %uint 1
+    %null_ev = OpConstantNull %event
+   %arr_uint = OpTypeArray %uint %n
+      %p_arr = OpTypePointer Workgroup %arr_uint
+        %lcl = OpVariable %p_arr Workgroup
+       %fnty = OpTypeFunction %void %p_gl
+          %k = OpFunction %void None %fnty
+        %src = OpFunctionParameter %p_gl
+        %lbl = OpLabel
+        %evp = OpVariable %p_ev Function
+        %dst = OpAccessChain %p_lo %lcl %sem
+         %ev = OpGroupAsyncCopy %event %scope %dst %src %n %stride %null_ev
+               OpStore %evp %ev
+               OpGroupWaitEvents %scope %one %evp
+               OpReturn
+               OpFunctionEnd
+; CHECK: = async_work_group_copy(
+; CHECK: wait_group_events(

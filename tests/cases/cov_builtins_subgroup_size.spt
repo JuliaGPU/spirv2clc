@@ -1,0 +1,31 @@
+; SubgroupSize / SubgroupMaxSize are scalar builtin variables that map to the
+; get_sub_group_size() / get_max_sub_group_size() queries; these need
+; cl_khr_subgroups (OpenCL C 2.0+) and fail loudly below that.
+; RUN: not %spirv2clc --asm --spirv-version=1.4 --cl-std=CL1.2 %s
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL2.0 %s | %FileCheck %s
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL2.0 %s | %clang -c -cl-std=CL2.0 -x cl - -o /dev/null
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability SubgroupDispatch
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test" %sgsz %sgmax
+               OpDecorate %sgsz BuiltIn SubgroupSize
+               OpDecorate %sgmax BuiltIn SubgroupMaxSize
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+  %p_in_uint = OpTypePointer Input %uint
+   %p_g_uint = OpTypePointer CrossWorkgroup %uint
+       %sgsz = OpVariable %p_in_uint Input
+      %sgmax = OpVariable %p_in_uint Input
+       %fnty = OpTypeFunction %void %p_g_uint
+          %k = OpFunction %void None %fnty
+        %out = OpFunctionParameter %p_g_uint
+        %lbl = OpLabel
+          %a = OpLoad %uint %sgsz
+          %b = OpLoad %uint %sgmax
+          %s = OpIAdd %uint %a %b
+               OpStore %out %s
+               OpReturn
+               OpFunctionEnd
+; CHECK-DAG: get_sub_group_size()
+; CHECK-DAG: get_max_sub_group_size()

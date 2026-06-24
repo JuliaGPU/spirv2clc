@@ -1,0 +1,35 @@
+; FPRoundingMode decorations on a conversion append _rte/_rtz/_rtp/_rtn to the
+; convert builtin. Four OpConvertUToF results cover all four modes.
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Linkage
+               OpMemoryModel Physical64 OpenCL
+               OpDecorate %rte FPRoundingMode RTE
+               OpDecorate %rtz FPRoundingMode RTZ
+               OpDecorate %rtp FPRoundingMode RTP
+               OpDecorate %rtn FPRoundingMode RTN
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+        %f32 = OpTypeFloat 32
+      %p_g_f = OpTypePointer CrossWorkgroup %f32
+       %fnty = OpTypeFunction %void %uint %p_g_f
+         %fn = OpFunction %void None %fnty
+          %x = OpFunctionParameter %uint
+        %out = OpFunctionParameter %p_g_f
+        %lbl = OpLabel
+        %rte = OpConvertUToF %f32 %x
+        %rtz = OpConvertUToF %f32 %x
+        %rtp = OpConvertUToF %f32 %x
+        %rtn = OpConvertUToF %f32 %x
+               OpStore %out %rte
+               OpStore %out %rtz
+               OpStore %out %rtp
+               OpStore %out %rtn
+               OpReturn
+               OpFunctionEnd
+; CHECK: = convert_float_rte(
+; CHECK: = convert_float_rtz(
+; CHECK: = convert_float_rtp(
+; CHECK: = convert_float_rtn(

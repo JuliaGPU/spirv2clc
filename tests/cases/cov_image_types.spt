@@ -1,0 +1,20 @@
+; OpTypeImage dimensionality (3D) and access-qualifier (WriteOnly) branches as
+; kernel parameters -> read_only image3d_t / write_only image2d_t.
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability ImageBasic
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k"
+       %void = OpTypeVoid
+       %img3 = OpTypeImage %void 3D 0 0 0 0 Unknown ReadOnly
+      %imgwo = OpTypeImage %void 2D 0 0 0 0 Unknown WriteOnly
+       %fnty = OpTypeFunction %void %img3 %imgwo
+          %k = OpFunction %void None %fnty
+         %a3 = OpFunctionParameter %img3
+         %aw = OpFunctionParameter %imgwo
+        %lbl = OpLabel
+               OpReturn
+               OpFunctionEnd
+; CHECK: void kernel k(read_only image3d_t {{[^,]+}}, write_only image2d_t {{.*}})

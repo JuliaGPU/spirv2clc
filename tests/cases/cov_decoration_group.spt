@@ -1,0 +1,24 @@
+; A decoration group (OpDecorationGroup) gathers decorations that OpGroupDecorate
+; then applies to its targets; here a Restrict group decorates a kernel pointer
+; parameter, which must surface as `restrict` on that argument.
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k"
+               OpDecorate %grp Restrict
+       %grp = OpDecorationGroup
+               OpGroupDecorate %grp %out
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+       %zero = OpConstant %uint 0
+   %p_g_uint = OpTypePointer CrossWorkgroup %uint
+       %fnty = OpTypeFunction %void %p_g_uint
+          %k = OpFunction %void None %fnty
+        %out = OpFunctionParameter %p_g_uint
+        %lbl = OpLabel
+               OpStore %out %zero
+               OpReturn
+               OpFunctionEnd
+; CHECK: kernel k(uint global* restrict

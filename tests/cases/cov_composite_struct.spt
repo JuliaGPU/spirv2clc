@@ -1,0 +1,39 @@
+; Struct composite ops: OpCompositeConstruct builds a struct, OpCompositeExtract
+; reads a member, OpCompositeInsert writes one. OpConstantFalse provides the
+; bool condition for an OpSelect that picks between two extracted members.
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+       %bool = OpTypeBool
+         %st = OpTypeStruct %uint %uint
+      %p_g_u = OpTypePointer CrossWorkgroup %uint
+     %uint_0 = OpConstant %uint 0
+     %uint_1 = OpConstant %uint 1
+      %false = OpConstantFalse %bool
+       %fnty = OpTypeFunction %void %p_g_u
+          %k = OpFunction %void None %fnty
+        %out = OpFunctionParameter %p_g_u
+        %lbl = OpLabel
+; OpCompositeConstruct: assemble a struct from two scalars.
+        %obj = OpCompositeConstruct %st %uint_0 %uint_1
+; OpCompositeExtract: read each struct member.
+         %m0 = OpCompositeExtract %uint %obj 0
+         %m1 = OpCompositeExtract %uint %obj 1
+; OpCompositeInsert: write a struct member, producing a new struct.
+        %obj2 = OpCompositeInsert %st %m0 %obj 1
+         %m1b = OpCompositeExtract %uint %obj2 1
+; OpConstantFalse feeding OpSelect: false picks the false-branch value.
+        %sel = OpSelect %uint %false %m1 %m1b
+               OpStore %out %sel
+               OpReturn
+               OpFunctionEnd
+; CHECK: = {((uint)0), ((uint)1)};
+; CHECK: = {{.*}}.m0;
+; CHECK: = {{.*}}.m1;
+; CHECK: {{.*}}.m1 = {{.*}};
+; CHECK: = false ? {{.*}} : {{.*}};

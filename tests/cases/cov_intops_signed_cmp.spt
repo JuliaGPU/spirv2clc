@@ -1,0 +1,36 @@
+; Signed comparisons (OpSLessThan/SLessThanEqual/SGreaterThan/SGreaterThanEqual)
+; reinterpret operands as signed; each bool result feeds an OpSelect so it is used.
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Linkage
+               OpMemoryModel Physical64 OpenCL
+       %void = OpTypeVoid
+       %bool = OpTypeBool
+       %uint = OpTypeInt 32 0
+      %p_g_u = OpTypePointer CrossWorkgroup %uint
+       %fnty = OpTypeFunction %void %uint %uint %p_g_u
+         %fn = OpFunction %void None %fnty
+          %a = OpFunctionParameter %uint
+          %b = OpFunctionParameter %uint
+        %out = OpFunctionParameter %p_g_u
+        %lbl = OpLabel
+       %clt = OpSLessThan %bool %a %b
+       %cle = OpSLessThanEqual %bool %a %b
+       %cgt = OpSGreaterThan %bool %a %b
+       %cge = OpSGreaterThanEqual %bool %a %b
+       %slt = OpSelect %uint %clt %a %b
+       %sle = OpSelect %uint %cle %a %b
+       %sgt = OpSelect %uint %cgt %a %b
+       %sge = OpSelect %uint %cge %a %b
+               OpStore %out %slt
+               OpStore %out %sle
+               OpStore %out %sgt
+               OpStore %out %sge
+               OpReturn
+               OpFunctionEnd
+; CHECK: as_int(v7) < as_int(v8)
+; CHECK: as_int(v7) <= as_int(v8)
+; CHECK: as_int(v7) > as_int(v8)
+; CHECK: as_int(v7) >= as_int(v8)

@@ -1,0 +1,35 @@
+; OpConstantSampler -> a program-scope `constant sampler_t = CLK_... | ... | ...;`
+; used directly by OpImageSampleExplicitLod (no OpTypeSampler parameter needed).
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability ImageBasic
+               OpCapability LiteralSampler
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+      %float = OpTypeFloat 32
+        %v2u = OpTypeVector %uint 2
+        %v4u = OpTypeVector %uint 4
+        %img = OpTypeImage %void 2D 0 0 0 0 Unknown ReadOnly
+       %simg = OpTypeSampledImage %img
+        %smp = OpTypeSampler
+    %p_g_v4u = OpTypePointer CrossWorkgroup %v4u
+         %c0 = OpConstant %uint 0
+      %fzero = OpConstant %float 0
+      %coord = OpConstantComposite %v2u %c0 %c0
+   %sampler0 = OpConstantSampler %smp None 0 Nearest
+       %fnty = OpTypeFunction %void %img %p_g_v4u
+          %k = OpFunction %void None %fnty
+       %imgp = OpFunctionParameter %img
+        %out = OpFunctionParameter %p_g_v4u
+        %lbl = OpLabel
+         %si = OpSampledImage %simg %imgp %sampler0
+        %tex = OpImageSampleExplicitLod %v4u %si %coord Lod %fzero
+               OpStore %out %tex
+               OpReturn
+               OpFunctionEnd
+; CHECK: constant sampler_t {{.*}} = CLK_ADDRESS_NONE | CLK_NORMALIZED_COORDS_FALSE | CLK_FILTER_NEAREST;
+; CHECK: read_imagei(

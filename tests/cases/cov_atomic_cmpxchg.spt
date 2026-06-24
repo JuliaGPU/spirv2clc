@@ -1,0 +1,23 @@
+; OpAtomicCompareExchange lowers to the legacy atomic_cmpxchg(ptr, cmp, val)
+; builtin; the equal/unequal memory-semantics operands are ignored.
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+         %pg = OpTypePointer CrossWorkgroup %uint
+      %scope = OpConstant %uint 1
+        %sem = OpConstant %uint 0
+        %cmp = OpConstant %uint 7
+        %val = OpConstant %uint 9
+       %fnty = OpTypeFunction %void %pg
+          %k = OpFunction %void None %fnty
+          %p = OpFunctionParameter %pg
+        %lbl = OpLabel
+        %old = OpAtomicCompareExchange %uint %p %scope %sem %sem %val %cmp
+               OpReturn
+               OpFunctionEnd
+; CHECK: = atomic_cmpxchg(

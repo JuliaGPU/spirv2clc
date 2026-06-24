@@ -1,0 +1,54 @@
+; Conversions: OpConvertFToU/FToS (float->int, FToS reads signed dest type and a
+; default rtz mode), OpSatConvert{SToU,UToS} (saturating int->int reinterpreting
+; signedness), OpSConvert/OpUConvert/OpFConvert (width changes; SConvert is signed).
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Linkage
+               OpCapability Int64
+               OpCapability Int16
+               OpCapability Float64
+               OpMemoryModel Physical64 OpenCL
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+      %ushrt = OpTypeInt 16 0
+      %ulong = OpTypeInt 64 0
+        %f32 = OpTypeFloat 32
+        %f64 = OpTypeFloat 64
+      %p_g_u = OpTypePointer CrossWorkgroup %uint
+      %p_g_s = OpTypePointer CrossWorkgroup %ushrt
+      %p_g_l = OpTypePointer CrossWorkgroup %ulong
+      %p_g_d = OpTypePointer CrossWorkgroup %f64
+       %fnty = OpTypeFunction %void %f32 %uint %p_g_u %p_g_s %p_g_l %p_g_d
+         %fn = OpFunction %void None %fnty
+          %f = OpFunctionParameter %f32
+          %i = OpFunctionParameter %uint
+        %ou = OpFunctionParameter %p_g_u
+        %os = OpFunctionParameter %p_g_s
+        %ol = OpFunctionParameter %p_g_l
+        %od = OpFunctionParameter %p_g_d
+        %lbl = OpLabel
+       %ftou = OpConvertFToU %uint %f
+       %ftos = OpConvertFToS %uint %f
+       %satsu = OpSatConvertSToU %ushrt %i
+       %satus = OpSatConvertUToS %ushrt %i
+       %sext = OpSConvert %ulong %i
+       %zext = OpUConvert %ulong %i
+       %fext = OpFConvert %f64 %f
+               OpStore %ou %ftou
+               OpStore %ou %ftos
+               OpStore %os %satsu
+               OpStore %os %satus
+               OpStore %ol %sext
+               OpStore %ol %zext
+               OpStore %od %fext
+               OpReturn
+               OpFunctionEnd
+; CHECK: = convert_uint_rtz(
+; CHECK: = convert_int_rtz(
+; CHECK: convert_short_sat(
+; CHECK: convert_ushort_sat(
+; CHECK: = convert_long(as_int(
+; CHECK: = convert_ulong(
+; CHECK: = convert_double(

@@ -1,0 +1,34 @@
+; Array composite ops: arrays are struct-wrapped, so OpCompositeExtract and
+; OpCompositeInsert index through the 'e' member, and OpCompositeConstruct emits
+; an extra brace level.
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+     %uint_0 = OpConstant %uint 0
+     %uint_1 = OpConstant %uint 1
+     %uint_2 = OpConstant %uint 2
+        %arr = OpTypeArray %uint %uint_2
+      %p_g_u = OpTypePointer CrossWorkgroup %uint
+       %fnty = OpTypeFunction %void %p_g_u
+          %k = OpFunction %void None %fnty
+        %out = OpFunctionParameter %p_g_u
+        %lbl = OpLabel
+; OpCompositeConstruct: build a struct-wrapped array (double-braced).
+        %obj = OpCompositeConstruct %arr %uint_0 %uint_1
+; OpCompositeExtract: index through the 'e' member.
+         %e0 = OpCompositeExtract %uint %obj 0
+; OpCompositeInsert: write through the 'e' member.
+       %obj2 = OpCompositeInsert %arr %e0 %obj 1
+         %e1 = OpCompositeExtract %uint %obj2 1
+               OpStore %out %e1
+               OpReturn
+               OpFunctionEnd
+; CHECK: = {{[{][{]}}((uint)0), ((uint)1){{[}][}]}};
+; CHECK: = {{.*}}.e[0];
+; CHECK: {{.*}}.e[1] = {{.*}};
+; CHECK: = {{.*}}.e[1];

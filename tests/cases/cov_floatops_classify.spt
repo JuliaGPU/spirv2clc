@@ -1,0 +1,42 @@
+; Floating-point classification predicates (bool result, consumed via OpSelect):
+; OpIsNan/OpIsInf/OpIsFinite/OpIsNormal/OpSignBitSet.
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Linkage
+               OpMemoryModel Physical64 OpenCL
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+        %f32 = OpTypeFloat 32
+       %bool = OpTypeBool
+      %p_g_u = OpTypePointer CrossWorkgroup %uint
+       %zero = OpConstant %uint 0
+        %one = OpConstant %uint 1
+       %fnty = OpTypeFunction %void %f32 %p_g_u
+         %fn = OpFunction %void None %fnty
+          %x = OpFunctionParameter %f32
+        %out = OpFunctionParameter %p_g_u
+        %lbl = OpLabel
+       %isn = OpIsNan %bool %x
+       %isi = OpIsInf %bool %x
+       %isf = OpIsFinite %bool %x
+       %ism = OpIsNormal %bool %x
+       %sgn = OpSignBitSet %bool %x
+        %r0 = OpSelect %uint %isn %one %zero
+        %r1 = OpSelect %uint %isi %one %zero
+        %r2 = OpSelect %uint %isf %one %zero
+        %r3 = OpSelect %uint %ism %one %zero
+        %r4 = OpSelect %uint %sgn %one %zero
+       %a01 = OpIAdd %uint %r0 %r1
+       %a23 = OpIAdd %uint %r2 %r3
+       %a03 = OpIAdd %uint %a01 %a23
+       %sum = OpIAdd %uint %a03 %r4
+               OpStore %out %sum
+               OpReturn
+               OpFunctionEnd
+; CHECK: isnan(
+; CHECK: isinf(
+; CHECK: isfinite(
+; CHECK: isnormal(
+; CHECK: signbit(
