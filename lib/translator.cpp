@@ -98,6 +98,26 @@ translator &translator::operator=(translator &&) = default;
 #include "instns_ext.cpp"
 
 bool translator::translate_capabilities() {
+  // Emit each enabling pragma at most once, even when several capabilities map
+  // to the same extension (e.g. the various subgroup capabilities).
+  std::unordered_set<std::string> enabled_extensions;
+  auto enable_extension = [&](const char *ext) {
+    if (enabled_extensions.insert(ext).second) {
+      m_src << "#pragma OPENCL EXTENSION " << ext << " : enable" << std::endl;
+    }
+  };
+  // cl_khr_subgroups is an OpenCL C 2.0 extension (promoted to the
+  // __opencl_c_subgroups optional feature in 3.0). The subgroup capabilities
+  // require it; refuse below 2.0 rather than emit an invalid pragma.
+  auto require_subgroups = [&](const char *what) {
+    if (m_opencl_c_version < 200) {
+      std::cerr << "UNIMPLEMENTED: " << what << " require OpenCL C 2.0 (targeting "
+                << opencl_c_version_str(m_opencl_c_version) << ").\n";
+      return false;
+    }
+    enable_extension("cl_khr_subgroups");
+    return true;
+  };
   for (auto &inst : m_ir->capabilities()) {
     assert(inst.opcode() == spv::Op::OpCapability);
     auto cap = inst.GetSingleWordOperand(0);
@@ -112,16 +132,20 @@ bool translator::translate_capabilities() {
     case SpvCapabilityImageBasic:
     case SpvCapabilityLiteralSampler:
     case SpvCapabilityFloat16Buffer:
-    // Declared by some devices (e.g. pocl) but only gates subgroup-dispatch
-    // builtins; harmless to accept for kernels that don't use them (any such
-    // op would still fail explicitly during instruction translation).
+      break;
     case SpvCapabilitySubgroupDispatch:
+      // Gates the subgroup query builtins (get_sub_group_id, ...). Some devices
+      // (e.g. pocl) declare it spuriously, so below 2.0 accept it silently and
+      // let any actual subgroup use error at its use site rather than fail here.
+      if (m_opencl_c_version >= 200) {
+        enable_extension("cl_khr_subgroups");
+      }
       break;
     case SpvCapabilityFloat16:
-      m_src << "#pragma OPENCL EXTENSION cl_khr_fp16 : enable" << std::endl;
+      enable_extension("cl_khr_fp16");
       break;
     case SpvCapabilityFloat64:
-      m_src << "#pragma OPENCL EXTENSION cl_khr_fp64 : enable" << std::endl;
+      enable_extension("cl_khr_fp64");
       break;
     case SpvCapabilityGenericPointer:
       // The generic address space is core in OpenCL C 2.0; see the matching
@@ -134,15 +158,10 @@ bool translator::translate_capabilities() {
       }
       break;
     case SpvCapabilityGroups:
-      // Work-group / sub-group collective builtins. cl_khr_subgroups is an
-      // OpenCL C 2.0 extension (promoted to the __opencl_c_subgroups optional
-      // feature in 3.0); enable it via pragma like the fp extensions above.
-      if (m_opencl_c_version < 200) {
-        std::cerr << "UNIMPLEMENTED: subgroups require OpenCL C 2.0 (targeting "
-                  << opencl_c_version_str(m_opencl_c_version) << ").\n";
+      // Work-group / sub-group collective builtins.
+      if (!require_subgroups("subgroups")) {
         return false;
       }
-      m_src << "#pragma OPENCL EXTENSION cl_khr_subgroups : enable" << std::endl;
       break;
     default:
       std::cerr << "UNIMPLEMENTED capability " << cap << ".\n";
@@ -351,6 +370,21 @@ bool translator::translate_annotations() {
         case SpvBuiltInLocalInvocationId:
         case SpvBuiltInNumWorkgroups:
         case SpvBuiltInWorkDim:
+          m_builtin_variables[target] = static_cast<SpvBuiltIn>(builtin);
+          break;
+        case SpvBuiltInSubgroupSize:
+        case SpvBuiltInSubgroupMaxSize:
+        case SpvBuiltInNumSubgroups:
+        case SpvBuiltInSubgroupId:
+        case SpvBuiltInSubgroupLocalInvocationId:
+          // Mapped to the get_sub_group_*() builtins, which need cl_khr_subgroups
+          // (OpenCL C 2.0+; the pragma is emitted from the subgroup capability).
+          if (m_opencl_c_version < 200) {
+            std::cerr << "UNIMPLEMENTED: subgroup builtins require OpenCL C 2.0 "
+                         "(targeting "
+                      << opencl_c_version_str(m_opencl_c_version) << ").\n";
+            return false;
+          }
           m_builtin_variables[target] = static_cast<SpvBuiltIn>(builtin);
           break;
         default:

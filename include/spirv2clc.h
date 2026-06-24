@@ -85,6 +85,16 @@ private:
       switch (m_builtin_values.at(id)) {
       case SpvBuiltInWorkDim:
         return src_function_call("get_work_dim");
+      case SpvBuiltInSubgroupSize:
+        return src_function_call("get_sub_group_size");
+      case SpvBuiltInSubgroupMaxSize:
+        return src_function_call("get_max_sub_group_size");
+      case SpvBuiltInNumSubgroups:
+        return src_function_call("get_num_sub_groups");
+      case SpvBuiltInSubgroupId:
+        return src_function_call("get_sub_group_id");
+      case SpvBuiltInSubgroupLocalInvocationId:
+        return src_function_call("get_sub_group_local_id");
       default:
         return "UNIMPLEMENTED";
       }

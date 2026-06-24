@@ -1,0 +1,31 @@
+; Subgroup query builtins arrive as BuiltIn variable loads and map to the
+; get_sub_group_*() functions, which need cl_khr_subgroups (OpenCL C 2.0+); below
+; that we fail loudly rather than emit an undeclared builtin.
+; RUN: not %spirv2clc --asm --spirv-version=1.4 --cl-std=CL1.2 %s
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL2.0 %s | %FileCheck %s
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL2.0 %s | %clang -c -cl-std=CL2.0 -x cl - -o /dev/null
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability SubgroupDispatch
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test" %sgid %nsg
+               OpDecorate %sgid BuiltIn SubgroupId
+               OpDecorate %nsg BuiltIn NumSubgroups
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+  %p_in_uint = OpTypePointer Input %uint
+   %p_g_uint = OpTypePointer CrossWorkgroup %uint
+       %sgid = OpVariable %p_in_uint Input
+        %nsg = OpVariable %p_in_uint Input
+       %fnty = OpTypeFunction %void %p_g_uint
+          %k = OpFunction %void None %fnty
+        %out = OpFunctionParameter %p_g_uint
+        %lbl = OpLabel
+          %a = OpLoad %uint %sgid
+          %b = OpLoad %uint %nsg
+          %s = OpIAdd %uint %a %b
+               OpStore %out %s
+               OpReturn
+               OpFunctionEnd
+; CHECK-DAG: get_sub_group_id()
+; CHECK-DAG: get_num_sub_groups()
