@@ -365,7 +365,6 @@ bool translator::translate_instruction(const Instruction &inst,
   case spv::Op::OpAtomicAnd:
   case spv::Op::OpAtomicExchange:
   case spv::Op::OpAtomicIAdd:
-  case spv::Op::OpAtomicFAddEXT:
   case spv::Op::OpAtomicISub:
   case spv::Op::OpAtomicOr:
   case spv::Op::OpAtomicSMax:
@@ -377,7 +376,6 @@ bool translator::translate_instruction(const Instruction &inst,
         {spv::Op::OpAtomicAnd, "and"},
         {spv::Op::OpAtomicExchange, "xchg"},
         {spv::Op::OpAtomicIAdd, "add"},
-        {spv::Op::OpAtomicFAddEXT, "add"},
         {spv::Op::OpAtomicISub, "sub"},
         {spv::Op::OpAtomicOr, "or"},
         {spv::Op::OpAtomicSMax, "max"},
@@ -398,6 +396,28 @@ bool translator::translate_instruction(const Instruction &inst,
     auto cmp = inst.GetSingleWordOperand(7);
     sval = src_function_call(atomic_builtin("cmpxchg", ptr), ptr, cmp,
                              val); // FIXME exact semantics
+    break;
+  }
+  case spv::Op::OpAtomicFAddEXT: {
+    // Floating-point atomic add (cl_ext_float_atomics). Unlike the integer
+    // atomics, OpenCL C has no legacy atomic_add(float*, float): float/double
+    // atomics are only exposed through the C11 atomic_fetch_add on an
+    // atomic_float/atomic_double operand. A plain atomic_add/atomic_fetch_add on
+    // a float* is ambiguous (it considers the integer overloads), so spell the
+    // C11 form and reinterpret the pointer as the matching atomic type. The
+    // value is the same bit width and layout, so the cast is sound.
+    auto ptr = inst.GetSingleWordOperand(2);
+    auto val = inst.GetSingleWordOperand(5);
+    auto ptrty = type_for_val(ptr)->AsPointer();
+    const char *atomic_ty =
+        ptrty->pointee_type()->AsFloat()->width() == 64 ? "atomic_double"
+                                                        : "atomic_float";
+    std::string as =
+        address_space_qualifier(static_cast<uint32_t>(ptrty->storage_class()));
+    std::string atomic_ptr = "(volatile " + (as.empty() ? "" : as + " ") +
+                             atomic_ty + "*)(" + var_for(ptr) + ")";
+    sval = "atomic_fetch_add(" + atomic_ptr + ", " + var_for(val) +
+           ")"; // FIXME exact semantics
     break;
   }
   case spv::Op::OpCompositeExtract: {

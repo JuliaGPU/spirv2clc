@@ -1,27 +1,44 @@
-; Floating-point atomic add (OpAtomicFAddEXT, SPV_EXT_shader_atomic_float_add)
-; maps to atomic_add on a float/double pointer, enabled by cl_ext_float_atomics.
+; Floating-point atomic add (OpAtomicFAddEXT, SPV_EXT_shader_atomic_float_add).
+; OpenCL C has no legacy atomic_add(float*, float): float/double atomics are only
+; exposed through the C11 atomic_fetch_add on an atomic_float/atomic_double
+; operand (a plain atomic_add/atomic_fetch_add on a float* is ambiguous against
+; the integer overloads). So reinterpret the pointer as the matching atomic type.
 ; (No %clang run: stock clang's default target doesn't expose float atomics;
 ; pocl, which advertises cl_ext_float_atomics, exercises this end to end.)
 ; RUN: %spirv2clc --asm --spirv-version=1.4 %s | %FileCheck %s
                OpCapability Kernel
                OpCapability Addresses
+               OpCapability Float64
                OpCapability AtomicFloat32AddEXT
+               OpCapability AtomicFloat64AddEXT
                OpExtension "SPV_EXT_shader_atomic_float_add"
                OpMemoryModel Physical64 OpenCL
-               OpEntryPoint Kernel %k "test"
+               OpEntryPoint Kernel %kf "test_f32"
+               OpEntryPoint Kernel %kd "test_f64"
        %void = OpTypeVoid
         %f32 = OpTypeFloat 32
+        %f64 = OpTypeFloat 64
        %uint = OpTypeInt 32 0
         %p_g = OpTypePointer CrossWorkgroup %f32
+       %p_gd = OpTypePointer CrossWorkgroup %f64
       %scope = OpConstant %uint 1
         %sem = OpConstant %uint 0
         %one = OpConstant %f32 1
-       %fnty = OpTypeFunction %void %p_g
-          %k = OpFunction %void None %fnty
+       %oned = OpConstant %f64 1
+      %fnty32 = OpTypeFunction %void %p_g
+      %fnty64 = OpTypeFunction %void %p_gd
+         %kf = OpFunction %void None %fnty32
         %ptr = OpFunctionParameter %p_g
         %lbl = OpLabel
         %old = OpAtomicFAddEXT %f32 %ptr %scope %sem %one
                OpReturn
                OpFunctionEnd
+         %kd = OpFunction %void None %fnty64
+       %ptrd = OpFunctionParameter %p_gd
+       %lbld = OpLabel
+       %oldd = OpAtomicFAddEXT %f64 %ptrd %scope %sem %oned
+               OpReturn
+               OpFunctionEnd
 ; CHECK: #pragma OPENCL EXTENSION cl_ext_float_atomics : enable
-; CHECK: = atomic_add(
+; CHECK: = atomic_fetch_add((volatile global atomic_float*)({{.*}}),
+; CHECK: = atomic_fetch_add((volatile global atomic_double*)({{.*}}),
