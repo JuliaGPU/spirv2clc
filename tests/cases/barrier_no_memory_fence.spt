@@ -1,0 +1,23 @@
+; A barrier/fence whose memory semantics name no address space (only an
+; ordering bit, e.g. SequentiallyConsistent=0x10 or Release=0x4) is a pure
+; execution barrier / no-op fence: emit it with flags 0 rather than failing.
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+         %wg = OpConstant %uint 2
+      %sem16 = OpConstant %uint 16
+       %sem4 = OpConstant %uint 4
+       %fnty = OpTypeFunction %void
+          %k = OpFunction %void None %fnty
+        %lbl = OpLabel
+               OpControlBarrier %wg %wg %sem16
+               OpMemoryBarrier %wg %sem4
+               OpReturn
+               OpFunctionEnd
+; CHECK-DAG: barrier(0)
+; CHECK-DAG: mem_fence(0)

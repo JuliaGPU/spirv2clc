@@ -78,7 +78,10 @@ std::string translator::fence_flags(uint32_t mem_sem) const {
   if (mem_sem & SpvMemorySemanticsImageMemoryMask) {
     add("CLK_IMAGE_MEM_FENCE");
   }
-  return flags;
+  // Semantics with only an ordering (or subgroup memory, which has no OpenCL C
+  // fence flag) fence no named address space: a pure execution barrier / no-op
+  // fence, spelled with flags 0.
+  return flags.empty() ? "0" : flags;
 }
 
 bool translator::translate_instruction(const Instruction &inst,
@@ -831,15 +834,7 @@ bool translator::translate_instruction(const Instruction &inst,
 
     // The fence flags come from the memory semantics (Workgroup memory -> local
     // fence, CrossWorkgroup memory -> global fence), not the memory scope.
-    auto mem_sem = mem_sem_cst->GetU32();
-    std::string flags = fence_flags(mem_sem);
-    if (flags.empty()) {
-      std::cerr << "UNIMPLEMENTED OpControlBarrier with memory semantics "
-                << mem_sem << std::endl;
-      return false;
-    }
-
-    src = src_function_call(barrier_fn, flags);
+    src = src_function_call(barrier_fn, fence_flags(mem_sem_cst->GetU32()));
     break;
   }
   case spv::Op::OpMemoryBarrier: {
@@ -854,15 +849,8 @@ bool translator::translate_instruction(const Instruction &inst,
           << std::endl;
       return false;
     }
-    auto mem_sem = mem_sem_cst->GetU32();
-    std::string flags = fence_flags(mem_sem);
-    if (flags.empty()) {
-      std::cerr << "UNIMPLEMENTED OpMemoryBarrier with memory semantics "
-                << mem_sem << std::endl;
-      return false;
-    }
     assign_result = false;
-    src = src_function_call("mem_fence", flags);
+    src = src_function_call("mem_fence", fence_flags(mem_sem_cst->GetU32()));
     break;
   }
   case spv::Op::OpGroupNonUniformShuffle:
