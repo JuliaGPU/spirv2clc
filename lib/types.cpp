@@ -576,6 +576,11 @@ bool translator::translate_types_values() {
         }
         m_src << ";" << std::endl;
         m_names[result] = "(&" + storagename + ")";
+        // The storage name already captured any linkage name; drop the export/
+        // import alias so references resolve through m_names (the &storage form)
+        // rather than the bare linkage identifier, which is never declared.
+        m_exports.erase(result);
+        m_imports.erase(result);
       } else if (storage == SpvStorageClassCrossWorkgroup) {
         // Program-scope global variable. Legal only from OpenCL C 2.0 on; below
         // that, program-scope variables must live in the constant address space.
@@ -597,6 +602,11 @@ bool translator::translate_types_values() {
         }
         m_src << ";" << std::endl;
         m_names[result] = "(&" + storagename + ")";
+        // The storage name already captured any linkage name; drop the export/
+        // import alias so references resolve through m_names (the &storage form)
+        // rather than the bare linkage identifier, which is never declared.
+        m_exports.erase(result);
+        m_imports.erase(result);
       } else {
         std::cerr << "UNIMPLEMENTED global variable with storage class "
                   << storage << std::endl;
