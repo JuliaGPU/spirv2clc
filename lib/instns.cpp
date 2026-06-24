@@ -122,6 +122,19 @@ bool translator::translate_instruction(const Instruction &inst,
       sval += var_for(param);
       sep = ", ";
     }
+    // Pass down the local-pointer parameters the callee expects for the
+    // module-scope Workgroup variables it references (see
+    // emit_function_signature / compute_workgroup_params). Each is in scope in
+    // the caller either as the entry kernel's storage pointer or as the caller's
+    // own threaded-through parameter.
+    auto wgit = m_function_workgroup_params.find(func);
+    if (wgit != m_function_workgroup_params.end()) {
+      for (auto wgvar : wgit->second) {
+        sval += sep;
+        sval += var_for(wgvar);
+        sep = ", ";
+      }
+    }
     sval += ")";
     if (type_for(rtype)->kind() == Type::Kind::kVoid) {
       assign_result = false;

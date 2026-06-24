@@ -1,0 +1,39 @@
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+; A module-scope Workgroup (local) variable referenced from a *called* function
+; rather than the entry point. OpenCL C has no program-scope local storage, so
+; the variable used to be declared only inside the kernel and the callee failed
+; to compile with `use of undeclared identifier`. The entry kernel must own the
+; storage and thread the variable into the callee as a local-pointer parameter.
+               OpCapability Kernel
+               OpCapability Addresses
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %kernel "test"
+               OpName %lm "local_memory"
+               OpName %helper "helper"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+     %uint_0 = OpConstant %uint 0
+     %uint_8 = OpConstant %uint 8
+        %arr = OpTypeArray %uint %uint_8
+     %plocal = OpTypePointer Workgroup %arr
+      %puint = OpTypePointer Workgroup %uint
+         %lm = OpVariable %plocal Workgroup
+       %fnty = OpTypeFunction %void
+     %kernel = OpFunction %void None %fnty
+       %klbl = OpLabel
+       %call = OpFunctionCall %void %helper
+               OpReturn
+               OpFunctionEnd
+     %helper = OpFunction %void None %fnty
+       %hlbl = OpLabel
+         %e0 = OpInBoundsPtrAccessChain %puint %lm %uint_0 %uint_0
+               OpStore %e0 %uint_0
+               OpReturn
+               OpFunctionEnd
+; The callee takes the Workgroup variable as a local-pointer parameter ...
+; CHECK: helper({{.*}}local* {{[A-Za-z_0-9]*}}local_memory
+; ... the entry kernel owns the actual storage ...
+; CHECK: local arr{{[0-9]+}} {{.*}}local_memory{{[A-Za-z_0-9]*}}_storage
+; ... and passes it down at the call site.
+; CHECK: helper(local_memory)

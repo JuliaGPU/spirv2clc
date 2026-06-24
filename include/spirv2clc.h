@@ -302,6 +302,10 @@ private:
   void emit_function_signature(spvtools::opt::Function &func,
                                bool is_prototype);
 
+  // Compute, per non-entry function, the module-scope Workgroup variables it
+  // references transitively (see m_function_workgroup_params).
+  void compute_workgroup_params();
+
   bool validate_module(const std::vector<uint32_t> &binary) const;
   int translate();
 
@@ -339,6 +343,7 @@ private:
     m_boolean_src_types.clear();
     m_local_variable_decls.clear();
     m_constant_string_literals.clear();
+    m_function_workgroup_params.clear();
   }
 
   spv_target_env m_target_env;
@@ -383,6 +388,12 @@ private:
   std::unordered_map<uint32_t, std::string> m_local_variable_decls;
   std::unordered_map<uint32_t, std::string>
       m_constant_string_literals; // variable id -> string literal
+  // Per non-entry function, the module-scope Workgroup (local) variables it
+  // references transitively, sorted by id for a stable parameter order. OpenCL
+  // C has no program-scope local storage, so the entry kernel owns the storage
+  // and passes each to its callees as a `local`-qualified pointer parameter.
+  std::unordered_map<uint32_t, std::vector<uint32_t>>
+      m_function_workgroup_params;
 };
 
 } // namespace spirv2clc

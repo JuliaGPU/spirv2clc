@@ -21,6 +21,9 @@
 #include "opt/ir_context.h"
 #include "spirv/unified1/OpenCL.std.h"
 
+#include <algorithm>
+#include <set>
+
 using namespace spvtools;
 using namespace spvtools::opt;
 using spvtools::opt::analysis::Type;
@@ -537,6 +540,50 @@ bool translator::translate_annotations() {
   return true;
 }
 
+void translator::compute_workgroup_params() {
+  auto defuse = m_ir->get_def_use_mgr();
+  for (auto &func : *m_ir->module()) {
+    auto fid = func.DefInst().result_id();
+    // Entry points declare the Workgroup storage themselves (see
+    // translate_function), so they take no extra parameters. Imported functions
+    // are external declarations we don't define or call with our own storage.
+    if (m_entry_points.count(fid) != 0 || m_imports.count(fid) != 0) {
+      continue;
+    }
+
+    // Collect every module-scope Workgroup variable referenced anywhere in this
+    // function's call tree (itself included). Sorted (std::set) so the parameter
+    // order is identical in the prototype, the definition and at the call sites.
+    std::set<uint32_t> used;
+    IRContext::ProcessFunction collect =
+        [this, &used, defuse](Function *f) -> bool {
+      for (auto &bb : *f) {
+        for (auto &inst : bb) {
+          for (auto &op : inst) {
+            if (!spvIsIdType(op.type)) {
+              continue;
+            }
+            auto def = defuse->GetDef(op.AsId());
+            if (def && def->opcode() == spv::Op::OpVariable &&
+                def->GetSingleWordOperand(2) == SpvStorageClassWorkgroup) {
+              used.insert(op.AsId());
+            }
+          }
+        }
+      }
+      return false;
+    };
+    std::queue<uint32_t> roots;
+    roots.push(fid);
+    m_ir->ProcessCallTreeFromRoots(collect, &roots);
+
+    if (!used.empty()) {
+      m_function_workgroup_params[fid] =
+          std::vector<uint32_t>(used.begin(), used.end());
+    }
+  }
+}
+
 void translator::emit_function_signature(Function &func, bool is_prototype) {
   auto &dinst = func.DefInst();
   auto rtype = dinst.type_id();
@@ -606,6 +653,22 @@ void translator::emit_function_signature(Function &func, bool is_prototype) {
     }
     sep = ", ";
   });
+
+  // Append local-pointer parameters for the module-scope Workgroup variables
+  // this non-entry function references (see compute_workgroup_params). The entry
+  // kernel owns the storage and passes these down at each call site.
+  if (!entrypoint) {
+    auto it = m_function_workgroup_params.find(result);
+    if (it != m_function_workgroup_params.end()) {
+      auto defuse = m_ir->get_def_use_mgr();
+      for (auto wgvar : it->second) {
+        m_src << sep;
+        m_src << src_type(defuse->GetDef(wgvar)->type_id()) << " "
+              << var_for(wgvar);
+        sep = ", ";
+      }
+    }
+  }
 
   m_src << ")";
   if (is_prototype) {
@@ -801,6 +864,11 @@ int translator::translate() {
   if (!translate_types_values()) {
     return 1;
   }
+
+  // Work out which non-entry functions reference module-scope Workgroup
+  // variables, so their signatures and call sites can thread them through as
+  // local-pointer parameters (OpenCL C has no program-scope local storage).
+  compute_workgroup_params();
 
   // 10. Function declarations (prototypes)
   for (auto &func : *m_ir->module()) {
