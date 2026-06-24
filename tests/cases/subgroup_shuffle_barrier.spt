@@ -1,0 +1,36 @@
+; Sub-group shuffle ops (OpGroupNonUniformShuffle/ShuffleXor) map to the
+; sub_group_shuffle/sub_group_shuffle_xor builtins, and an OpControlBarrier with
+; a Subgroup execution scope maps to sub_group_barrier -- all cl_khr_subgroups
+; (OpenCL C 2.0+), so fail loudly below 2.0.
+; RUN: not %spirv2clc --asm --spirv-version=1.4 --cl-std=CL1.2 %s
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL3.0 %s | %FileCheck %s
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL3.0 %s | %clang -c -cl-std=CL3.0 -x cl - -o /dev/null
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability GroupNonUniformShuffle
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test" %sgid
+               OpDecorate %sgid BuiltIn SubgroupLocalInvocationId
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+        %f32 = OpTypeFloat 32
+  %p_in_uint = OpTypePointer Input %uint
+    %p_g_f32 = OpTypePointer CrossWorkgroup %f32
+       %sgid = OpVariable %p_in_uint Input
+        %sem = OpConstant %uint 784
+        %sg3 = OpConstant %uint 3
+       %fnty = OpTypeFunction %void %p_g_f32
+          %k = OpFunction %void None %fnty
+        %out = OpFunctionParameter %p_g_f32
+        %lbl = OpLabel
+        %lid = OpLoad %uint %sgid
+        %val = OpLoad %f32 %out
+         %sh = OpGroupNonUniformShuffle %f32 %sg3 %val %lid
+        %shx = OpGroupNonUniformShuffleXor %f32 %sg3 %val %lid
+               OpControlBarrier %sg3 %sg3 %sem
+               OpStore %out %sh
+               OpReturn
+               OpFunctionEnd
+; CHECK-DAG: sub_group_shuffle(
+; CHECK-DAG: sub_group_shuffle_xor(
+; CHECK-DAG: sub_group_barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE)

@@ -170,7 +170,10 @@ bool translator::translate_capabilities() {
       }
       break;
     case SpvCapabilityGroups:
-      // Work-group / sub-group collective builtins.
+    case SpvCapabilityGroupNonUniform:
+    case SpvCapabilityGroupNonUniformShuffle:
+      // Work-group / sub-group collective builtins (shuffle, ...), all available
+      // under cl_khr_subgroups.
       if (!require_subgroups("subgroups")) {
         return false;
       }

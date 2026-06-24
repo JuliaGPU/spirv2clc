@@ -779,10 +779,17 @@ bool translator::translate_instruction(const Instruction &inst,
       return false;
     }
 
-    if (exec_scope_cst->GetU32() != SpvScopeWorkgroup) {
-      std::cerr
-          << "UNIMPLEMENTED OpControlBarrier with non-workgroup execution scope"
-          << std::endl;
+    // The execution scope selects the barrier: work-group (barrier) vs
+    // sub-group (sub_group_barrier, cl_khr_subgroups).
+    auto exec_scope = exec_scope_cst->GetU32();
+    const char *barrier_fn;
+    if (exec_scope == SpvScopeWorkgroup) {
+      barrier_fn = "barrier";
+    } else if (exec_scope == SpvScopeSubgroup) {
+      barrier_fn = "sub_group_barrier";
+    } else {
+      std::cerr << "UNIMPLEMENTED OpControlBarrier execution scope " << exec_scope
+                << std::endl;
       return false;
     }
 
@@ -815,13 +822,29 @@ bool translator::translate_instruction(const Instruction &inst,
       flags += flags.empty() ? "" : " | ";
       flags += "CLK_GLOBAL_MEM_FENCE";
     }
+    if (mem_sem & SpvMemorySemanticsImageMemoryMask) {
+      flags += flags.empty() ? "" : " | ";
+      flags += "CLK_IMAGE_MEM_FENCE";
+    }
     if (flags.empty()) {
       std::cerr << "UNIMPLEMENTED OpControlBarrier with memory semantics "
                 << mem_sem << std::endl;
       return false;
     }
 
-    src = src_function_call("barrier", flags);
+    src = src_function_call(barrier_fn, flags);
+    break;
+  }
+  case spv::Op::OpGroupNonUniformShuffle:
+  case spv::Op::OpGroupNonUniformShuffleXor: {
+    // Sub-group shuffle: operands are <scope> <value> <id|mask>. The scope is
+    // Subgroup; map to the cl_khr_subgroups shuffle builtins.
+    auto value = inst.GetSingleWordOperand(3);
+    auto index = inst.GetSingleWordOperand(4);
+    const char *fn = opcode == spv::Op::OpGroupNonUniformShuffle
+                         ? "sub_group_shuffle"
+                         : "sub_group_shuffle_xor";
+    sval = src_function_call(fn, value, index);
     break;
   }
   case spv::Op::OpGroupAsyncCopy: {
