@@ -1,0 +1,25 @@
+; OpAtomicLoad / OpAtomicStore have no legacy OpenCL C mapping; they lower to
+; the C11 atomic_load/atomic_store on a reinterpreted atomic pointer, which is
+; OpenCL C 2.0+. Below 2.0 translation must fail.
+; RUN: not %spirv2clc --asm --cl-std=CL1.2 %s
+; RUN: %spirv2clc --asm --cl-std=CL2.0 %s | %FileCheck %s
+; RUN: %spirv2clc --asm --cl-std=CL2.0 %s | %clang -c -cl-std=CL2.0 -x cl - -o /dev/null
+               OpCapability Kernel
+               OpCapability Addresses
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+         %pg = OpTypePointer CrossWorkgroup %uint
+      %scope = OpConstant %uint 1
+        %sem = OpConstant %uint 0
+       %fnty = OpTypeFunction %void %pg
+          %k = OpFunction %void None %fnty
+          %p = OpFunctionParameter %pg
+         %bb = OpLabel
+          %v = OpAtomicLoad %uint %p %scope %sem
+               OpAtomicStore %p %scope %sem %v
+               OpReturn
+               OpFunctionEnd
+; CHECK: atomic_load((volatile global atomic_uint*)(
+; CHECK: atomic_store((volatile global atomic_uint*)(

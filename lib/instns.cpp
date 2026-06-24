@@ -63,6 +63,24 @@ std::string translator::atomic_builtin(const std::string &op,
   return (is64 ? "atom_" : "atomic_") + op;
 }
 
+std::string translator::atomic_c11_pointer(uint32_t ptr) const {
+  auto ptrty = type_for_val(ptr)->AsPointer();
+  auto pointee = ptrty->pointee_type();
+  std::string ty;
+  if (pointee->kind() == Type::Kind::kFloat) {
+    ty = pointee->AsFloat()->width() == 64 ? "atomic_double" : "atomic_float";
+  } else {
+    auto i = pointee->AsInteger();
+    bool is64 = i->width() == 64;
+    ty = is64 ? (i->IsSigned() ? "atomic_long" : "atomic_ulong")
+              : (i->IsSigned() ? "atomic_int" : "atomic_uint");
+  }
+  std::string as =
+      address_space_qualifier(static_cast<uint32_t>(ptrty->storage_class()));
+  return "(volatile " + (as.empty() ? "" : as + " ") + ty + "*)(" +
+         var_for(ptr) + ")";
+}
+
 std::string translator::fence_flags(uint32_t mem_sem) const {
   std::string flags;
   auto add = [&](const char *f) {
@@ -422,6 +440,28 @@ bool translator::translate_instruction(const Instruction &inst,
                              atomic_ty + "*)(" + var_for(ptr) + ")";
     sval = "atomic_fetch_add(" + atomic_ptr + ", " + var_for(val) +
            ")"; // FIXME exact semantics
+    break;
+  }
+  case spv::Op::OpAtomicLoad:
+  case spv::Op::OpAtomicStore: {
+    // OpenCL C has no legacy atomic_load/atomic_store; only the C11 forms exist
+    // (OpenCL C 2.0+), operating on a reinterpreted atomic pointer like
+    // OpAtomicFAddEXT. The scope/semantics operands are ignored, as elsewhere.
+    if (m_opencl_c_version < 200) {
+      std::cerr << "UNIMPLEMENTED: atomic load/store require OpenCL C 2.0 "
+                   "(targeting "
+                << opencl_c_version_str(m_opencl_c_version) << ").\n";
+      return false;
+    }
+    if (opcode == spv::Op::OpAtomicLoad) {
+      auto ptr = inst.GetSingleWordOperand(2);
+      sval = "atomic_load(" + atomic_c11_pointer(ptr) + ")";
+    } else {
+      auto ptr = inst.GetSingleWordOperand(0);
+      auto val = inst.GetSingleWordOperand(3);
+      src = "atomic_store(" + atomic_c11_pointer(ptr) + ", " + var_for(val) +
+            ")";
+    }
     break;
   }
   case spv::Op::OpCompositeExtract: {

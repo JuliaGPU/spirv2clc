@@ -255,6 +255,11 @@ private:
   // ("add", "inc", ...) from the atomic pointer's pointee width.
   std::string atomic_builtin(const std::string &op, uint32_t ptr) const;
 
+  // C11 atomic pointer reinterpretation for atomic load/store (OpenCL C 2.0+),
+  // e.g. "(volatile global atomic_uint*)(v12)". Picks atomic_int/uint/long/
+  // ulong/float/double from the pointee type.
+  std::string atomic_c11_pointer(uint32_t ptr) const;
+
   // The CLK_*_MEM_FENCE flags string for a SPIR-V memory-semantics mask (empty
   // if no memory class is set). Shared by the barrier and fence instructions.
   std::string fence_flags(uint32_t mem_sem) const;
