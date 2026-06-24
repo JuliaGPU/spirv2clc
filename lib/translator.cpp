@@ -140,7 +140,13 @@ bool translator::translate_capabilities() {
     case SpvCapabilityVector16:
     case SpvCapabilityImageBasic:
     case SpvCapabilityLiteralSampler:
+      break;
     case SpvCapabilityFloat16Buffer:
+      // Float16Buffer only promises half-typed *buffers*, but we materialize
+      // half as a value type (return values, locals, parameters, constants),
+      // all of which require cl_khr_fp16 in OpenCL C. Enable it here too; the
+      // pragma is harmless when only half buffers are used.
+      enable_extension("cl_khr_fp16");
       break;
     case SpvCapabilitySubgroupDispatch:
       // Gates the subgroup query builtins (get_sub_group_id, ...). Some devices

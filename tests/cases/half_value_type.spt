@@ -1,0 +1,27 @@
+; A module that uses half only as a *value* type (function return/parameter)
+; declares the Float16Buffer capability, not Float16 (this is how llvm-spirv
+; lowers half-using OpenCL programs). OpenCL C still requires cl_khr_fp16 to
+; spell `half` as a value type, so the enabling pragma must be emitted.
+; RUN: %spirv2clc --asm --spirv-version=1.4 %s | %FileCheck %s
+; RUN: %spirv2clc --asm --spirv-version=1.4 %s | %clang -c -cl-std=CL3.0 -x cl - -o /dev/null
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Float16Buffer
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k"
+       %void = OpTypeVoid
+       %half = OpTypeFloat 16
+      %sqty = OpTypeFunction %half %half
+      %kty = OpTypeFunction %void
+     %square = OpFunction %half None %sqty
+          %x = OpFunctionParameter %half
+        %bb1 = OpLabel
+         %sq = OpFMul %half %x %x
+               OpReturnValue %sq
+               OpFunctionEnd
+          %k = OpFunction %void None %kty
+        %bb2 = OpLabel
+               OpReturn
+               OpFunctionEnd
+; CHECK: #pragma OPENCL EXTENSION cl_khr_fp16 : enable
+; CHECK: half {{[A-Za-z0-9_]+}}(half
