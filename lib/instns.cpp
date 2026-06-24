@@ -777,20 +777,6 @@ bool translator::translate_instruction(const Instruction &inst,
       return false;
     }
 
-    std::string flags;
-    switch (mem_scope_cst->GetU32()) {
-    case SpvScopeWorkgroup:
-      flags = "CLK_LOCAL_MEM_FENCE";
-      break;
-    case SpvScopeDevice:
-      flags = "CLK_GLOBAL_MEM_FENCE";
-      break;
-    default:
-      std::cerr << "UNIMPLEMENTED memory scope in OpControlBarrier "
-                << memory_scope << std::endl;
-      return false;
-    }
-
     auto mem_sem_cst = cstmgr->FindDeclaredConstant(memory_semantics);
     if (mem_sem_cst == nullptr) {
       std::cerr
@@ -799,11 +785,20 @@ bool translator::translate_instruction(const Instruction &inst,
       return false;
     }
 
+    // The fence flags come from the memory semantics (Workgroup memory -> local
+    // fence, CrossWorkgroup memory -> global fence), not the memory scope.
+    // Accept any combination, including both set together, which is the common
+    // barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE).
     auto mem_sem = mem_sem_cst->GetU32();
-    if ((mem_sem != (SpvMemorySemanticsSequentiallyConsistentMask |
-                     SpvMemorySemanticsWorkgroupMemoryMask)) &&
-        (mem_sem != (SpvMemorySemanticsSequentiallyConsistentMask |
-                     SpvMemorySemanticsCrossWorkgroupMemoryMask))) {
+    std::string flags;
+    if (mem_sem & SpvMemorySemanticsWorkgroupMemoryMask) {
+      flags = "CLK_LOCAL_MEM_FENCE";
+    }
+    if (mem_sem & SpvMemorySemanticsCrossWorkgroupMemoryMask) {
+      flags += flags.empty() ? "" : " | ";
+      flags += "CLK_GLOBAL_MEM_FENCE";
+    }
+    if (flags.empty()) {
       std::cerr << "UNIMPLEMENTED OpControlBarrier with memory semantics "
                 << mem_sem << std::endl;
       return false;
