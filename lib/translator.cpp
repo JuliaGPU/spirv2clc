@@ -269,10 +269,10 @@ bool translator::translate_execution_modes() {
     case SpvExecutionModeContractionOff:
       m_entry_points_contraction_off.insert(ep);
       break;
-    // Subgroup-size requirement declared by some devices (e.g. pocl). The
-    // OpenCL 1.2 target has no way to express it; ignore it for kernels that
-    // don't use subgroup operations.
+    // Required sub-group size -> intel_reqd_sub_group_size kernel attribute
+    // (see emit_function_signature).
     case SpvExecutionModeSubgroupSize:
+      m_entry_points_subgroup_size[ep] = em.GetSingleWordOperand(2);
       break;
     default:
       std::cerr << "UNIMPLEMENTED execution mode " << mode << ".\n";
@@ -574,6 +574,10 @@ void translator::emit_function_signature(Function &func, bool is_prototype) {
       m_src << std::get<0>(req) << "," << std::get<1>(req) << ","
             << std::get<2>(req);
       m_src << "))) ";
+    }
+    if (m_entry_points_subgroup_size.count(result)) {
+      m_src << "__attribute((intel_reqd_sub_group_size("
+            << m_entry_points_subgroup_size.at(result) << "))) ";
     }
     m_src << m_entry_points.at(result);
   } else {

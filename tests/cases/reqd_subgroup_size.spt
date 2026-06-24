@@ -1,0 +1,26 @@
+; The SubgroupSize execution mode is a required sub-group size; emit it as the
+; intel_reqd_sub_group_size kernel attribute (which drivers like pocl honor to
+; restrict the sub-group size) rather than dropping it.
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL3.0 %s | %clang -c -cl-std=CL3.0 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL3.0 %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability SubgroupDispatch
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test" %sgid
+               OpExecutionMode %k SubgroupSize 32
+               OpDecorate %sgid BuiltIn SubgroupId
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+  %p_in_uint = OpTypePointer Input %uint
+   %p_g_uint = OpTypePointer CrossWorkgroup %uint
+       %sgid = OpVariable %p_in_uint Input
+       %fnty = OpTypeFunction %void %p_g_uint
+          %k = OpFunction %void None %fnty
+        %out = OpFunctionParameter %p_g_uint
+        %lbl = OpLabel
+        %val = OpLoad %uint %sgid
+               OpStore %out %val
+               OpReturn
+               OpFunctionEnd
+; CHECK: kernel __attribute((intel_reqd_sub_group_size(32))) test

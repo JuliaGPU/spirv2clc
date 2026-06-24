@@ -320,6 +320,7 @@ private:
     m_entry_points.clear();
     m_entry_points_local_size.clear();
     m_entry_points_contraction_off.clear();
+    m_entry_points_subgroup_size.clear();
     m_builtin_variables.clear();
     m_builtin_values.clear();
     m_rounding_mode_decorations.clear();
@@ -357,6 +358,7 @@ private:
   std::unordered_map<uint32_t, std::tuple<uint32_t, uint32_t, uint32_t>>
       m_entry_points_local_size;
   std::unordered_set<uint32_t> m_entry_points_contraction_off;
+  std::unordered_map<uint32_t, uint32_t> m_entry_points_subgroup_size;
   std::unordered_map<uint32_t, SpvBuiltIn> m_builtin_variables;
   std::unordered_map<uint32_t, SpvBuiltIn> m_builtin_values;
   std::unordered_map<uint32_t, SpvFPRoundingMode> m_rounding_mode_decorations;
