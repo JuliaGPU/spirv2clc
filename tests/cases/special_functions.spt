@@ -1,0 +1,28 @@
+; erf/erfc/tgamma are standard OpenCL C math builtins but were missing from the
+; unary extended-instruction table, so they translated to UNIMPLEMENTED.
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+        %ext = OpExtInstImport "OpenCL.std"
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+       %void = OpTypeVoid
+        %f32 = OpTypeFloat 32
+    %p_g_f32 = OpTypePointer CrossWorkgroup %f32
+       %fnty = OpTypeFunction %void %p_g_f32 %f32
+          %k = OpFunction %void None %fnty
+        %out = OpFunctionParameter %p_g_f32
+          %x = OpFunctionParameter %f32
+        %lbl = OpLabel
+          %a = OpExtInst %f32 %ext erf %x
+          %b = OpExtInst %f32 %ext erfc %x
+          %c = OpExtInst %f32 %ext tgamma %x
+         %ab = OpFAdd %f32 %a %b
+        %abc = OpFAdd %f32 %ab %c
+               OpStore %out %abc
+               OpReturn
+               OpFunctionEnd
+; CHECK-DAG: erf(
+; CHECK-DAG: erfc(
+; CHECK-DAG: tgamma(

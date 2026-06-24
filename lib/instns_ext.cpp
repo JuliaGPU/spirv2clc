@@ -131,6 +131,8 @@ static std::unordered_map<OpenCLLIB::Entrypoints, const std::string>
         {OpenCLLIB::Cosh, "cosh"},
         {OpenCLLIB::Cospi, "cospi"},
         {OpenCLLIB::Degrees, "degrees"},
+        {OpenCLLIB::Erf, "erf"},
+        {OpenCLLIB::Erfc, "erfc"},
         {OpenCLLIB::Exp, "exp"},
         {OpenCLLIB::Exp2, "exp2"},
         {OpenCLLIB::Exp10, "exp10"},
@@ -173,6 +175,7 @@ static std::unordered_map<OpenCLLIB::Entrypoints, const std::string>
         {OpenCLLIB::Tan, "tan"},
         {OpenCLLIB::Tanh, "tanh"},
         {OpenCLLIB::Tanpi, "tanpi"},
+        {OpenCLLIB::Tgamma, "tgamma"},
         {OpenCLLIB::Trunc, "trunc"},
 };
 
