@@ -1,0 +1,30 @@
+; Generic address-space cast instructions: OpPtrCastToGeneric (named -> generic)
+; and OpGenericCastToPtr (generic -> named) lower to plain casts to the result
+; pointer type, which already carries the destination address space. OpPtrEqual
+; lowers to `==` like the integer equality family. All require OpenCL C 2.0+.
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL2.0 %s | %FileCheck %s
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL2.0 %s | %clang -c -cl-std=CL2.0 -x cl - -o /dev/null
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability GenericPointer
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+       %bool = OpTypeBool
+         %pg = OpTypePointer CrossWorkgroup %uint
+       %pgen = OpTypePointer Generic %uint
+        %c42 = OpConstant %uint 42
+       %fnty = OpTypeFunction %void %pg
+          %k = OpFunction %void None %fnty
+          %g = OpFunctionParameter %pg
+         %bb = OpLabel
+        %gen = OpPtrCastToGeneric %pgen %g
+       %back = OpGenericCastToPtr %pg %gen
+               OpStore %back %c42
+         %eq = OpPtrEqual %bool %g %back
+               OpReturn
+               OpFunctionEnd
+; CHECK: ((uint generic*)
+; CHECK: ((uint global*)
+; CHECK: ==

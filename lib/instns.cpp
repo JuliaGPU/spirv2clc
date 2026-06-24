@@ -221,7 +221,11 @@ bool translator::translate_instruction(const Instruction &inst,
     break;
   }
   case spv::Op::OpConvertPtrToU:
-  case spv::Op::OpConvertUToPtr: {
+  case spv::Op::OpConvertUToPtr:
+  case spv::Op::OpPtrCastToGeneric:
+  case spv::Op::OpGenericCastToPtr: {
+    // The result pointer type already carries the destination address space
+    // (e.g. `uint generic*` / `uint global*`), so a plain cast suffices.
     auto src = inst.GetSingleWordOperand(2);
     sval = src_cast(rtype, src);
     break;
@@ -620,7 +624,9 @@ bool translator::translate_instruction(const Instruction &inst,
   case spv::Op::OpLogicalEqual:
   case spv::Op::OpLogicalNotEqual:
   case spv::Op::OpIEqual:
-  case spv::Op::OpINotEqual: {
+  case spv::Op::OpINotEqual:
+  case spv::Op::OpPtrEqual:
+  case spv::Op::OpPtrNotEqual: {
     auto op1 = inst.GetSingleWordOperand(2);
     boolean_result = true;
     boolean_result_src_type = src_type_boolean_for_val(op1);
@@ -1019,6 +1025,8 @@ std::string translator::translate_binop(const Instruction &inst) const {
       {spv::Op::OpLogicalNotEqual, "!="},
       {spv::Op::OpIEqual, "=="},
       {spv::Op::OpINotEqual, "!="},
+      {spv::Op::OpPtrEqual, "=="},
+      {spv::Op::OpPtrNotEqual, "!="},
       {spv::Op::OpBitwiseOr, "|"},
       {spv::Op::OpBitwiseXor, "^"},
       {spv::Op::OpBitwiseAnd, "&"},
