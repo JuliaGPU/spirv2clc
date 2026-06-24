@@ -538,6 +538,27 @@ bool translator::translate_types_values() {
         }
         m_src << ";" << std::endl;
         m_names[result] = "(&" + storagename + ")";
+      } else if (storage == SpvStorageClassCrossWorkgroup) {
+        // Program-scope global variable. Legal only from OpenCL C 2.0 on; below
+        // that, program-scope variables must live in the constant address space.
+        if (m_opencl_c_version < 200) {
+          std::cerr << "UNIMPLEMENTED: program-scope global variable requires "
+                       "OpenCL C 2.0 (targeting "
+                    << opencl_c_version_str(m_opencl_c_version) << ").\n";
+          return false;
+        }
+        // As with UniformConstant, declare the storage as a value and make every
+        // reference take its address (the SPIR-V id is a pointer to it).
+        auto storagename = make_valid_identifier(var_for(result) + "_storage");
+        m_src << "global "
+              << src_type_memory_object_declaration(typointeeid, result,
+                                                    storagename);
+        if (inst.NumOperands() > 3) {
+          auto init = inst.GetSingleWordOperand(3);
+          m_src << " = " << var_for(init);
+        }
+        m_src << ";" << std::endl;
+        m_names[result] = "(&" + storagename + ")";
       } else {
         std::cerr << "UNIMPLEMENTED global variable with storage class "
                   << storage << std::endl;

@@ -1,0 +1,24 @@
+; A program-scope variable in the global (CrossWorkgroup) address space. Legal
+; from OpenCL C 2.0 on; below that, translation must fail (program-scope
+; variables must reside in the constant address space pre-2.0).
+; RUN: not %spirv2clc --asm --cl-std=CL1.2 %s
+; RUN: %spirv2clc --asm --cl-std=CL2.0 %s | %FileCheck %s
+; RUN: %spirv2clc --asm --cl-std=CL2.0 %s | %clang -c -cl-std=CL2.0 -x cl - -o /dev/null
+               OpCapability Kernel
+               OpCapability Addresses
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+         %pg = OpTypePointer CrossWorkgroup %uint
+         %c7 = OpConstant %uint 7
+       %glob = OpVariable %pg CrossWorkgroup %c7
+       %fnty = OpTypeFunction %void
+          %k = OpFunction %void None %fnty
+         %bb = OpLabel
+          %v = OpLoad %uint %glob
+        %inc = OpIAdd %uint %v %c7
+               OpStore %glob %inc
+               OpReturn
+               OpFunctionEnd
+; CHECK: global uint {{[A-Za-z0-9_]+}}_storage = ((uint)7)
