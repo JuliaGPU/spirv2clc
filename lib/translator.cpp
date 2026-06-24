@@ -133,6 +133,17 @@ bool translator::translate_capabilities() {
         return false;
       }
       break;
+    case SpvCapabilityGroups:
+      // Work-group / sub-group collective builtins. cl_khr_subgroups is an
+      // OpenCL C 2.0 extension (promoted to the __opencl_c_subgroups optional
+      // feature in 3.0); enable it via pragma like the fp extensions above.
+      if (m_opencl_c_version < 200) {
+        std::cerr << "UNIMPLEMENTED: subgroups require OpenCL C 2.0 (targeting "
+                  << opencl_c_version_str(m_opencl_c_version) << ").\n";
+        return false;
+      }
+      m_src << "#pragma OPENCL EXTENSION cl_khr_subgroups : enable" << std::endl;
+      break;
     default:
       std::cerr << "UNIMPLEMENTED capability " << cap << ".\n";
       return false;
