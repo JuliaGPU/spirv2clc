@@ -38,20 +38,18 @@ std::string translator::src_pointer_type(uint32_t storage, uint32_t tyid, bool s
   case SpvStorageClassGeneric:
     // The generic address space is core from OpenCL C 2.0 on. Below that there
     // is no equivalent qualifier (we could try to resolve the storage class
-    // from the pointer's origin, but that's not implemented), so error loudly
+    // from the pointer's origin, but that's not implemented), so fail loudly
     // rather than silently emit something unsupported.
     if (m_opencl_c_version >= 200) {
       typestr += "generic";
       break;
     }
-    std::cerr << "UNIMPLEMENTED generic address space requires OpenCL C 2.0 "
-                 "(targeting "
-              << opencl_c_version_str(m_opencl_c_version) << ")" << std::endl;
-    return "UNIMPLEMENTED";
+    return note_unsupported("generic address space requires OpenCL C 2.0 "
+                            "(targeting " +
+                            opencl_c_version_str(m_opencl_c_version) + ")");
   default:
-    std::cerr << "UNIMPLEMENTED pointer storage class " << storage
-              << std::endl;
-    return "UNIMPLEMENTED";
+    return note_unsupported("pointer storage class " +
+                            std::to_string(storage));
   }
 
   typestr += "*";

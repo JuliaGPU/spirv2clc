@@ -96,7 +96,8 @@ private:
       case SpvBuiltInSubgroupLocalInvocationId:
         return src_function_call("get_sub_group_local_id");
       default:
-        return "UNIMPLEMENTED";
+        return note_unsupported("builtin value " +
+                                std::to_string(m_builtin_values.at(id)));
       }
     } else {
       return "v" + std::to_string(id);
@@ -143,7 +144,7 @@ private:
     if (m_types.count(id)) {
       return m_types.at(id);
     } else {
-      return "UNKNOWN TYPE";
+      return note_unsupported("type " + std::to_string(id));
     }
   }
 
@@ -159,7 +160,7 @@ private:
     if (m_types_signed.count(id)) {
       return m_types_signed.at(id);
     } else {
-      return "UNKNOWN SIGNED TYPE";
+      return note_unsupported("signed type " + std::to_string(id));
     }
   }
 
@@ -295,7 +296,13 @@ private:
   bool validate_module(const std::vector<uint32_t> &binary) const;
   int translate();
 
+  // Record that `what` can't be translated: emit a diagnostic, flag the failure
+  // so translate() returns an error rather than silently producing a placeholder
+  // marker in the output, and return that marker for the caller to splice in.
+  std::string note_unsupported(const std::string &what) const;
+
   void reset() {
+    m_translation_failed = false;
     m_src.str("");
     m_names.clear();
     m_types.clear();
@@ -327,6 +334,9 @@ private:
   spv_target_env m_target_env;
   // Target OpenCL C language version (120, 200, 300).
   unsigned m_opencl_c_version;
+  // Set when an unsupported value/type/construct was encountered (see
+  // note_unsupported); makes translate() fail instead of emitting a marker.
+  mutable bool m_translation_failed = false;
 
   std::unique_ptr<spvtools::opt::IRContext> m_ir;
   std::stringstream m_src;

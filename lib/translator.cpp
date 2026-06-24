@@ -92,6 +92,12 @@ translator::~translator() = default;
 translator::translator(translator &&) = default;
 translator &translator::operator=(translator &&) = default;
 
+std::string translator::note_unsupported(const std::string &what) const {
+  std::cerr << "UNIMPLEMENTED " << what << std::endl;
+  m_translation_failed = true;
+  return "UNIMPLEMENTED";
+}
+
 #include "utils.cpp"
 #include "types.cpp"
 #include "instns.cpp"
@@ -782,6 +788,13 @@ int translator::translate() {
     if (!translate_function(func)) {
       return 1;
     }
+  }
+
+  // Catch anything that emitted an UNIMPLEMENTED placeholder via note_unsupported
+  // rather than failing on the spot (e.g. an unknown value or type referenced
+  // while building an expression).
+  if (m_translation_failed) {
+    return 1;
   }
 
   return 0;
