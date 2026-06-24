@@ -1,0 +1,32 @@
+; 64-bit integer atomics use the atom_*() builtins from cl_khr_int64_*_atomics;
+; the atomic_*() names are 32-bit only (clang: call to 'atomic_add' is
+; ambiguous for a 64-bit operand). Pick the name from the operand width and
+; enable the int64-atomics extensions for the Int64Atomics capability.
+; RUN: %spirv2clc --asm --spirv-version=1.4 %s | %clang -c -cl-std=CL3.0 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm --spirv-version=1.4 %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Int64
+               OpCapability Int64Atomics
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+      %ulong = OpTypeInt 64 0
+       %p_gu = OpTypePointer CrossWorkgroup %uint
+       %p_gl = OpTypePointer CrossWorkgroup %ulong
+      %scope = OpConstant %uint 1
+        %sem = OpConstant %uint 0
+       %u_v5 = OpConstant %uint 5
+       %l_v5 = OpConstant %ulong 5
+       %fnty = OpTypeFunction %void %p_gu %p_gl
+          %k = OpFunction %void None %fnty
+         %pu = OpFunctionParameter %p_gu
+         %pl = OpFunctionParameter %p_gl
+        %lbl = OpLabel
+        %o32 = OpAtomicIAdd %uint %pu %scope %sem %u_v5
+        %o64 = OpAtomicIAdd %ulong %pl %scope %sem %l_v5
+               OpReturn
+               OpFunctionEnd
+; CHECK-DAG: = atomic_add(
+; CHECK-DAG: = atom_add(

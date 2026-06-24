@@ -250,6 +250,11 @@ private:
            ", " + var_for(op4) + ", " + var_for(op5) + ")";
   }
 
+  // OpenCL spells 64-bit integer atomics atom_* (cl_khr_int64_*_atomics) and
+  // 32-bit atomics atomic_* (core since OpenCL C 1.1); pick the name for `op`
+  // ("add", "inc", ...) from the atomic pointer's pointee width.
+  std::string atomic_builtin(const std::string &op, uint32_t ptr) const;
+
   std::string src_pointer_type(uint32_t storage, uint32_t tyid, bool signedty) const;
 
   std::string src_aggregate_element_type(uint32_t tyid) const;

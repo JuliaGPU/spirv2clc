@@ -54,6 +54,15 @@ bool translator::emit_access_chain(const Instruction &inst, bool ptr_variant,
   return true;
 }
 
+std::string translator::atomic_builtin(const std::string &op,
+                                       uint32_t ptr) const {
+  auto pointee = type_for_val(ptr)->AsPointer()->pointee_type();
+  bool is64 = pointee->kind() == Type::Kind::kInteger &&
+              pointee->AsInteger()->width() == 64;
+  // atom_* (cl_khr_int64_*_atomics) for 64-bit, atomic_* (core) otherwise.
+  return (is64 ? "atom_" : "atomic_") + op;
+}
+
 bool translator::translate_instruction(const Instruction &inst,
                                        std::string &src) {
   auto opcode = inst.opcode();
@@ -296,12 +305,12 @@ bool translator::translate_instruction(const Instruction &inst,
   }
   case spv::Op::OpAtomicIIncrement: {
     auto ptr = inst.GetSingleWordOperand(2);
-    sval = src_function_call("atomic_inc", ptr); // FIXME exact semantics
+    sval = src_function_call(atomic_builtin("inc", ptr), ptr); // FIXME exact semantics
     break;
   }
   case spv::Op::OpAtomicIDecrement: {
     auto ptr = inst.GetSingleWordOperand(2);
-    sval = src_function_call("atomic_dec", ptr); // FIXME exact semantics
+    sval = src_function_call(atomic_builtin("dec", ptr), ptr); // FIXME exact semantics
     break;
   }
   case spv::Op::OpAtomicAnd:
@@ -315,27 +324,28 @@ bool translator::translate_instruction(const Instruction &inst,
   case spv::Op::OpAtomicUMin:
   case spv::Op::OpAtomicXor: {
     static std::unordered_map<spv::Op, const char *> fns{
-        {spv::Op::OpAtomicAnd, "atomic_and"},
-        {spv::Op::OpAtomicExchange, "atomic_xchg"},
-        {spv::Op::OpAtomicIAdd, "atomic_add"},
-        {spv::Op::OpAtomicISub, "atomic_sub"},
-        {spv::Op::OpAtomicOr, "atomic_or"},
-        {spv::Op::OpAtomicSMax, "atomic_max"},
-        {spv::Op::OpAtomicSMin, "atomic_min"},
-        {spv::Op::OpAtomicUMax, "atomic_max"},
-        {spv::Op::OpAtomicUMin, "atomic_min"},
-        {spv::Op::OpAtomicXor, "atomic_xor"},
+        {spv::Op::OpAtomicAnd, "and"},
+        {spv::Op::OpAtomicExchange, "xchg"},
+        {spv::Op::OpAtomicIAdd, "add"},
+        {spv::Op::OpAtomicISub, "sub"},
+        {spv::Op::OpAtomicOr, "or"},
+        {spv::Op::OpAtomicSMax, "max"},
+        {spv::Op::OpAtomicSMin, "min"},
+        {spv::Op::OpAtomicUMax, "max"},
+        {spv::Op::OpAtomicUMin, "min"},
+        {spv::Op::OpAtomicXor, "xor"},
     };
     auto ptr = inst.GetSingleWordOperand(2);
     auto val = inst.GetSingleWordOperand(5);
-    sval = src_function_call(fns.at(opcode), ptr, val); // FIXME exact semantics
+    sval = src_function_call(atomic_builtin(fns.at(opcode), ptr), ptr,
+                             val); // FIXME exact semantics
     break;
   }
   case spv::Op::OpAtomicCompareExchange: {
     auto ptr = inst.GetSingleWordOperand(2);
     auto val = inst.GetSingleWordOperand(6);
     auto cmp = inst.GetSingleWordOperand(7);
-    sval = src_function_call("atomic_cmpxchg", ptr, cmp,
+    sval = src_function_call(atomic_builtin("cmpxchg", ptr), ptr, cmp,
                              val); // FIXME exact semantics
     break;
   }

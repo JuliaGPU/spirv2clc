@@ -153,6 +153,12 @@ bool translator::translate_capabilities() {
     case SpvCapabilityFloat64:
       enable_extension("cl_khr_fp64");
       break;
+    case SpvCapabilityInt64Atomics:
+      // 64-bit atomics. The atomic_*() builtins already cover the long/ulong
+      // overloads; just enable the extensions (available since OpenCL C 1.1).
+      enable_extension("cl_khr_int64_base_atomics");
+      enable_extension("cl_khr_int64_extended_atomics");
+      break;
     case SpvCapabilityGenericPointer:
       // The generic address space is core in OpenCL C 2.0; see the matching
       // mapping of SpvStorageClassGeneric in src_pointer_type (types.cpp).
