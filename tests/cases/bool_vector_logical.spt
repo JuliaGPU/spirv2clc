@@ -1,0 +1,65 @@
+; A vector of OpTypeBool has no OpenCL C type ("boolN" is invalid). When such a
+; constant is an operand to a logical op, it must be re-spelled as a signed-int
+; vector at the width of the other operand. The same bool-vector constant
+; (%alltrue) is used in both a float4 (-> int4) and a double4 (-> long4) context,
+; so its spelling must follow the consumer.
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL3.0 %s | %FileCheck %s
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL3.0 %s | %clang -c -cl-std=CL3.0 -x cl - -o /dev/null
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Int64
+               OpCapability Float64
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %kf "kf"
+               OpEntryPoint Kernel %kd "kd"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+      %ulong = OpTypeInt 64 0
+      %float = OpTypeFloat 32
+     %double = OpTypeFloat 64
+       %bool = OpTypeBool
+    %v4uint = OpTypeVector %uint 4
+   %v4ulong = OpTypeVector %ulong 4
+   %v4float = OpTypeVector %float 4
+  %v4double = OpTypeVector %double 4
+    %v4bool = OpTypeVector %bool 4
+       %true = OpConstantTrue %bool
+    %alltrue = OpConstantComposite %v4bool %true %true %true %true
+   %nullbool = OpConstantNull %v4bool
+     %fzero = OpConstantNull %v4float
+     %dzero = OpConstantNull %v4double
+     %uone = OpConstant %uint 1
+      %ones = OpConstantComposite %v4uint %uone %uone %uone %uone
+     %uzero = OpConstantNull %v4uint
+    %ulone = OpConstant %ulong 1
+    %ulones = OpConstantComposite %v4ulong %ulone %ulone %ulone %ulone
+    %ulzero = OpConstantNull %v4ulong
+  %pg_v4uint = OpTypePointer CrossWorkgroup %v4uint
+ %pg_v4ulong = OpTypePointer CrossWorkgroup %v4ulong
+      %ftype = OpTypeFunction %void %pg_v4uint %v4float
+      %dtype = OpTypeFunction %void %pg_v4ulong %v4double
+         %kf = OpFunction %void None %ftype
+       %fout = OpFunctionParameter %pg_v4uint
+         %fa = OpFunctionParameter %v4float
+        %fbb = OpLabel
+        %cmp = OpFUnordNotEqual %v4bool %fa %fzero
+        %and = OpLogicalAnd %v4bool %cmp %alltrue
+         %or = OpLogicalOr %v4bool %and %nullbool
+        %sel = OpSelect %v4uint %or %ones %uzero
+               OpStore %fout %sel
+               OpReturn
+               OpFunctionEnd
+         %kd = OpFunction %void None %dtype
+       %dout = OpFunctionParameter %pg_v4ulong
+         %da = OpFunctionParameter %v4double
+        %dbb = OpLabel
+       %cmpd = OpFUnordNotEqual %v4bool %da %dzero
+       %andd = OpLogicalAnd %v4bool %cmpd %alltrue
+       %seld = OpSelect %v4ulong %andd %ulones %ulzero
+               OpStore %dout %seld
+               OpReturn
+               OpFunctionEnd
+; CHECK-NOT: bool4
+; CHECK: ((int4)(true, true, true, true))
+; CHECK: ((int4)(0))
+; CHECK: ((long4)(true, true, true, true))

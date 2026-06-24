@@ -1059,6 +1059,29 @@ bool translator::translate_instruction(const Instruction &inst,
   return true;
 }
 
+std::string translator::src_boolean_operand(uint32_t op,
+                                            const std::string &booltype) const {
+  auto type = type_for_val(op);
+  if (type->kind() == Type::Kind::kVector &&
+      type->AsVector()->element_type()->kind() == Type::Kind::kBool) {
+    auto def = m_ir->get_def_use_mgr()->GetDef(op);
+    if (def && def->opcode() == spv::Op::OpConstantNull) {
+      return "((" + booltype + ")(0))";
+    }
+    if (def && def->opcode() == spv::Op::OpConstantComposite) {
+      std::string s = "((" + booltype + ")(";
+      const char *sep = "";
+      for (uint32_t i = 0; i < def->NumInOperands(); i++) {
+        s += sep;
+        s += var_for(def->GetSingleWordInOperand(i)); // "true" / "false"
+        sep = ", ";
+      }
+      return s + "))";
+    }
+  }
+  return var_for(op);
+}
+
 std::string translator::translate_binop(const Instruction &inst) const {
   static std::unordered_map<spv::Op, const std::string> binops = {
       {spv::Op::OpFMul, "*"},
@@ -1106,6 +1129,30 @@ std::string translator::translate_binop(const Instruction &inst) const {
   auto v2 = inst.GetSingleWordOperand(3);
 
   auto &srcop = binops.at(inst.opcode());
+
+  switch (inst.opcode()) {
+  case spv::Op::OpLogicalAnd:
+  case spv::Op::OpLogicalOr:
+  case spv::Op::OpLogicalEqual:
+  case spv::Op::OpLogicalNotEqual: {
+    // Bool-vector constant operands have no OpenCL C type; re-spell them at the
+    // signed-int vector width of the other operand. The non-constant operand is
+    // a comparison/logical result, so its width is recorded in
+    // m_boolean_src_types (a bool-vector constant is not).
+    std::string bt;
+    if (m_boolean_src_types.count(v1)) {
+      bt = m_boolean_src_types.at(v1);
+    } else if (m_boolean_src_types.count(v2)) {
+      bt = m_boolean_src_types.at(v2);
+    } else {
+      bt = src_type_boolean_for_val(v1);
+    }
+    return src_boolean_operand(v1, bt) + " " + srcop + " " +
+           src_boolean_operand(v2, bt);
+  }
+  default:
+    break;
+  }
 
   return var_for(v1) + " " + srcop + " " + var_for(v2);
 }

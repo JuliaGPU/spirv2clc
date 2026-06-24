@@ -140,6 +140,13 @@ private:
 
   std::string src_type_boolean_for_val(uint32_t val) const;
 
+  // Spell an operand of a logical op. A vector of OpTypeBool has no OpenCL C
+  // type ("boolN" is invalid), so re-spell a bool-vector *constant* operand at
+  // the result's signed-int vector width `booltype`. Other operands (scalars,
+  // and non-constant bool vectors already tracked in m_boolean_src_types) are
+  // returned unchanged.
+  std::string src_boolean_operand(uint32_t op, const std::string &booltype) const;
+
   std::string src_type(uint32_t id) const {
     if (m_types.count(id)) {
       return m_types.at(id);
