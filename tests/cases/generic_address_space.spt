@@ -1,0 +1,28 @@
+; The generic address space has no OpenCL C 1.2 mapping (translation must fail
+; there), but is core from OpenCL C 2.0 on, where a pointer into it lowers to
+; the `generic` qualifier. A helper function carries the generic pointer, since
+; OpenCL forbids generic pointers as kernel parameters.
+; RUN: not %spirv2clc --asm --spirv-version=1.4 --cl-std=CL1.2 %s
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL2.0 %s | %FileCheck %s
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL2.0 %s | %clang -c -cl-std=CL2.0 -x cl - -o /dev/null
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability GenericPointer
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %main "test"
+       %void = OpTypeVoid
+        %f32 = OpTypeFloat 32
+  %p_gen_f32 = OpTypePointer Generic %f32
+     %helpty = OpTypeFunction %f32 %p_gen_f32
+     %mainty = OpTypeFunction %void
+       %help = OpFunction %f32 None %helpty
+          %p = OpFunctionParameter %p_gen_f32
+        %hbb = OpLabel
+        %val = OpLoad %f32 %p
+               OpReturnValue %val
+               OpFunctionEnd
+       %main = OpFunction %void None %mainty
+        %mbb = OpLabel
+               OpReturn
+               OpFunctionEnd
+; CHECK: generic*

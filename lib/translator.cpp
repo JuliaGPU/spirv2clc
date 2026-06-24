@@ -32,6 +32,11 @@ std::ostream &operator<<(std::ostream &os, const spv::Op &op) {
   return os;
 }
 
+// Human-readable form of an OpenCL C version encoded as 120/200/300.
+std::string opencl_c_version_str(unsigned v) {
+  return std::to_string(v / 100) + "." + std::to_string((v % 100) / 10);
+}
+
 std::string rounding_mode(SpvFPRoundingMode mode) {
   switch (mode) {
   case SpvFPRoundingModeRTE:
@@ -80,7 +85,8 @@ const spvtools::MessageConsumer spvtools_message_consumer =
 
 namespace spirv2clc {
 
-translator::translator(spv_target_env env) : m_target_env(env) {}
+translator::translator(spv_target_env env, unsigned opencl_c_version)
+    : m_target_env(env), m_opencl_c_version(opencl_c_version) {}
 
 translator::~translator() = default;
 translator::translator(translator &&) = default;
@@ -116,6 +122,16 @@ bool translator::translate_capabilities() {
       break;
     case SpvCapabilityFloat64:
       m_src << "#pragma OPENCL EXTENSION cl_khr_fp64 : enable" << std::endl;
+      break;
+    case SpvCapabilityGenericPointer:
+      // The generic address space is core in OpenCL C 2.0; see the matching
+      // mapping of SpvStorageClassGeneric in src_pointer_type (types.cpp).
+      if (m_opencl_c_version < 200) {
+        std::cerr << "UNIMPLEMENTED: generic address space requires OpenCL C "
+                     "2.0 (targeting "
+                  << opencl_c_version_str(m_opencl_c_version) << ").\n";
+        return false;
+      }
       break;
     default:
       std::cerr << "UNIMPLEMENTED capability " << cap << ".\n";

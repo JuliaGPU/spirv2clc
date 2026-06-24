@@ -45,7 +45,12 @@ namespace spirv2clc {
 
 struct translator {
 
-  LIBSPIRV2CLC_EXPORT translator(spv_target_env env = SPV_ENV_OPENCL_1_2);
+  // `opencl_c_version` selects the OpenCL C language version to emit for,
+  // encoded as in `CL_TARGET_OPENCL_VERSION` (120, 200, 300). Constructs that
+  // aren't available at that version (e.g. the generic address space below 2.0)
+  // are diagnosed rather than silently emitted.
+  LIBSPIRV2CLC_EXPORT translator(spv_target_env env = SPV_ENV_OPENCL_1_2,
+                                 unsigned opencl_c_version = 120);
 
   LIBSPIRV2CLC_EXPORT translator(translator &&);
   LIBSPIRV2CLC_EXPORT translator &operator=(translator &&);
@@ -310,6 +315,8 @@ private:
   }
 
   spv_target_env m_target_env;
+  // Target OpenCL C language version (120, 200, 300).
+  unsigned m_opencl_c_version;
 
   std::unique_ptr<spvtools::opt::IRContext> m_ir;
   std::stringstream m_src;

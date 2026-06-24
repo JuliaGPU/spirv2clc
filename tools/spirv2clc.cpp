@@ -50,13 +50,25 @@ std::unordered_map<std::string, spv_target_env> get_spirv_version_map() {
   };
 }
 
+// OpenCL C language version to emit for, named like Clang's / clBuildProgram's
+// -cl-std option, and encoded as in CL_TARGET_OPENCL_VERSION.
+std::unordered_map<std::string, unsigned> get_cl_std_map() {
+  return {
+    {"CL1.2", 120}, {"cl1.2", 120},
+    {"CL2.0", 200}, {"cl2.0", 200},
+    {"CL3.0", 300}, {"cl3.0", 300},
+  };
+}
+
 void fail_help(const char *prog) {
-  std::cerr << "Usage: " << prog << " [ --asm ] [ --spirv-version=<version> ] input.spv[asm]" << std::endl;
+  std::cerr << "Usage: " << prog << " [ --asm ] [ --spirv-version=<version> ] [ --cl-std=<version> ] input.spv[asm]" << std::endl;
   std::cerr << "Available SPIR-V versions:" << std::endl;
   std::cerr << "  1.0, 1.1, universal1.2, 1.3, 1.4, 1.5, 1.6" << std::endl;
   std::cerr << "  opencl1.2, opencl2.0, opencl2.1, opencl2.2 (and embedded variants)" << std::endl;
   std::cerr << "  vulkan1.0, vulkan1.1, vulkan1.2, vulkan1.3" << std::endl;
   std::cerr << "  opengl4.0, opengl4.1, opengl4.2, opengl4.3, opengl4.5" << std::endl;
+  std::cerr << "Available OpenCL C versions for --cl-std (default CL1.2):" << std::endl;
+  std::cerr << "  CL1.2, CL2.0, CL3.0" << std::endl;
   exit(EXIT_FAILURE);
 }
 
@@ -64,7 +76,9 @@ int main(int argc, char *argv[]) {
 
   bool input_asm = false;
   spv_target_env target_env = SPV_ENV_OPENCL_1_2; // default
+  unsigned opencl_c_version = 120; // default
   auto version_map = get_spirv_version_map();
+  auto cl_std_map = get_cl_std_map();
 
   int arg = 1;
 
@@ -86,6 +100,15 @@ int main(int argc, char *argv[]) {
       }
       target_env = it->second;
       num_options++;
+    } else if (!strncmp(argv[arg], "--cl-std=", 9)) {
+      std::string version_str = argv[arg] + 9;
+      auto it = cl_std_map.find(version_str);
+      if (it == cl_std_map.end()) {
+        std::cerr << "Unknown OpenCL C version '" << version_str << "'" << std::endl;
+        fail_help(argv[0]);
+      }
+      opencl_c_version = it->second;
+      num_options++;
     } else if (!strncmp(argv[arg], "--", 2)) {
       std::cerr << "Unknown option '" << argv[arg] << "'" << std::endl;
       fail_help(argv[0]);
@@ -105,7 +128,7 @@ int main(int argc, char *argv[]) {
     exit(EXIT_FAILURE);
   }
 
-  spirv2clc::translator translator(target_env);
+  spirv2clc::translator translator(target_env, opencl_c_version);
   std::string srcgen;
   int err;
   if (input_asm) {
