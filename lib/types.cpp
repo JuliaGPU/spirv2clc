@@ -9,6 +9,35 @@ std::string translator::src_aggregate_element_type(uint32_t tyid) const {
   return src_type(tyid);
 }
 
+std::string translator::address_space_qualifier(uint32_t storage) const {
+  switch (storage) {
+  case SpvStorageClassCrossWorkgroup:
+    return "global";
+  case SpvStorageClassUniformConstant:
+    return "constant";
+  case SpvStorageClassWorkgroup:
+    return "local";
+  case SpvStorageClassInput:
+    return "";
+  case SpvStorageClassFunction:
+    return "private";
+  case SpvStorageClassGeneric:
+    // The generic address space is core from OpenCL C 2.0 on. Below that there
+    // is no equivalent qualifier (we could try to resolve the storage class
+    // from the pointer's origin, but that's not implemented), so fail loudly
+    // rather than silently emit something unsupported.
+    if (m_opencl_c_version >= 200) {
+      return "generic";
+    }
+    return note_unsupported("generic address space requires OpenCL C 2.0 "
+                            "(targeting " +
+                            opencl_c_version_str(m_opencl_c_version) + ")");
+  default:
+    return note_unsupported("pointer storage class " +
+                            std::to_string(storage));
+  }
+}
+
 std::string translator::src_pointer_type(uint32_t storage, uint32_t tyid, bool signedty) const {
   // Every pointee type (including arrays, which are struct-wrapped) has a flat
   // type name, so a pointer is just "<pointee> <addrspace>*". A pointer-to-array
@@ -19,40 +48,11 @@ std::string translator::src_pointer_type(uint32_t storage, uint32_t tyid, bool s
   } else {
     typestr += src_type(tyid);
   }
-  typestr += " ";
-  switch (storage) {
-  case SpvStorageClassCrossWorkgroup:
-    typestr += "global";
-    break;
-  case SpvStorageClassUniformConstant:
-    typestr += "constant";
-    break;
-  case SpvStorageClassWorkgroup:
-    typestr += "local";
-    break;
-  case SpvStorageClassInput:
-    break;
-  case SpvStorageClassFunction:
-    typestr += "private";
-    break;
-  case SpvStorageClassGeneric:
-    // The generic address space is core from OpenCL C 2.0 on. Below that there
-    // is no equivalent qualifier (we could try to resolve the storage class
-    // from the pointer's origin, but that's not implemented), so fail loudly
-    // rather than silently emit something unsupported.
-    if (m_opencl_c_version >= 200) {
-      typestr += "generic";
-      break;
-    }
-    return note_unsupported("generic address space requires OpenCL C 2.0 "
-                            "(targeting " +
-                            opencl_c_version_str(m_opencl_c_version) + ")");
-  default:
-    return note_unsupported("pointer storage class " +
-                            std::to_string(storage));
+  std::string as = address_space_qualifier(storage);
+  if (as == "UNIMPLEMENTED") {
+    return as;
   }
-
-  typestr += "*";
+  typestr += " " + as + "*";
   return typestr;
 }
 

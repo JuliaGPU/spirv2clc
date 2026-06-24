@@ -1,9 +1,12 @@
 ; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
 ; RUN: %spirv2clc --asm %s | %FileCheck %s
-; OpCopyMemory (typed) and OpCopyMemorySized (raw byte count, possibly between
-; differently-typed same-sized operands) used to hit UNIMPLEMENTED. They lower
-; to whole-object assignments, reinterpreting the target through the source's
-; pointer type for the sized form.
+; OpCopyMemory (typed) copies the pointee by value: both pointers have the same
+; pointee type, so it lowers to a whole-object assignment.
+;
+; OpCopyMemorySized copies an explicit byte count that may differ from the size
+; of either pointee type (e.g. copying one element out of a larger wrapper). It
+; must honor that count with a byte-wise copy rather than a typed assignment of
+; the wrong size: here %d points to an 8-byte array but only 4 bytes are copied.
                OpCapability Kernel
                OpCapability Addresses
                OpCapability Int64
@@ -13,7 +16,7 @@
        %uint = OpTypeInt 32 0
       %ulong = OpTypeInt 64 0
      %uint_2 = OpConstant %uint 2
-    %ulong_8 = OpConstant %ulong 8
+    %ulong_4 = OpConstant %ulong 4
         %arr = OpTypeArray %uint %uint_2
          %pa = OpTypePointer Function %arr
          %st = OpTypeStruct %uint %uint
@@ -25,7 +28,8 @@
          %so = OpFunctionParameter %ps
         %lbl = OpLabel
                OpCopyMemory %d %s
-               OpCopyMemorySized %d %so %ulong_8
+               OpCopyMemorySized %d %so %ulong_4
                OpReturn
                OpFunctionEnd
 ; CHECK: = *(
+; CHECK: for (ulong _i = 0; _i < ((ulong)4); ++_i) ((uchar private*)({{.*}}))[_i] = ((uchar private*)({{.*}}))[_i];

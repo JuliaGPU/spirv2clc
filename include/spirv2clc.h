@@ -259,6 +259,11 @@ private:
   // if no memory class is set). Shared by the barrier and fence instructions.
   std::string fence_flags(uint32_t mem_sem) const;
 
+  // The OpenCL address-space keyword for a SPIR-V storage class ("global",
+  // "private", ...), empty for storage classes with no qualifier (e.g. Input).
+  // Fails translation (returns "UNIMPLEMENTED") for unsupported classes.
+  std::string address_space_qualifier(uint32_t storage) const;
+
   std::string src_pointer_type(uint32_t storage, uint32_t tyid, bool signedty) const;
 
   std::string src_aggregate_element_type(uint32_t tyid) const;

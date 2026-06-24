@@ -185,17 +185,14 @@ bool translator::translate_instruction(const Instruction &inst,
     src = "*" + var_for(ptr) + " = " + var_for(val);
     break;
   }
-  case spv::Op::OpCopyMemory:
-  case spv::Op::OpCopyMemorySized: {
+  case spv::Op::OpCopyMemory: {
     auto target = inst.GetSingleWordOperand(0);
     auto source = inst.GetSingleWordOperand(1);
     assign_result = false;
-    // Copy the pointee by value (arrays are struct-wrapped, so this is a legal
-    // aggregate assignment). The sized form may have differently-typed (but
-    // same-sized) operands, and the two pointers may live in different address
-    // spaces. A pointer cast cannot change a pointer's address space, so cast
-    // the source to the target's pointee type *within the source's own address
-    // space* and let the value assignment cross address spaces (always legal).
+    // Same pointee type, so copy by value (arrays are struct-wrapped, so this
+    // is a legal aggregate assignment). A cast cannot change address space, so
+    // reinterpret the source to the target's pointee within its own space and
+    // let the assignment cross address spaces.
     auto src_storage =
         static_cast<uint32_t>(type_for_val(source)->AsPointer()->storage_class());
     auto tgt_pointee =
@@ -203,6 +200,24 @@ bool translator::translate_instruction(const Instruction &inst,
     src = "*(" + var_for(target) + ") = *((" +
           src_pointer_type(src_storage, tgt_pointee, false) + ")(" +
           var_for(source) + "))";
+    break;
+  }
+  case spv::Op::OpCopyMemorySized: {
+    auto target = inst.GetSingleWordOperand(0);
+    auto source = inst.GetSingleWordOperand(1);
+    auto size = inst.GetSingleWordOperand(2);
+    assign_result = false;
+    // Explicit byte count, and the operands may have differently-sized pointee
+    // types, so a typed assignment would copy the wrong amount. Copy byte-wise
+    // instead, casting each pointer to a byte pointer in its own address space;
+    // optimizers fold the small loop back into an efficient copy.
+    auto tgt_as = address_space_qualifier(
+        static_cast<uint32_t>(type_for_val(target)->AsPointer()->storage_class()));
+    auto src_as = address_space_qualifier(
+        static_cast<uint32_t>(type_for_val(source)->AsPointer()->storage_class()));
+    src = "for (ulong _i = 0; _i < " + var_for(size) + "; ++_i) ((uchar " +
+          tgt_as + "*)(" + var_for(target) + "))[_i] = ((uchar " + src_as +
+          "*)(" + var_for(source) + "))[_i]";
     break;
   }
   case spv::Op::OpConvertPtrToU:
