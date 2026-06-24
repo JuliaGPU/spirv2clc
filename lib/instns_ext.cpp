@@ -95,6 +95,15 @@ translator::translate_extended_binary(const Instruction &inst) const {
       static_cast<OpenCLLIB::Entrypoints>(inst.GetSingleWordOperand(3));
   auto x = inst.GetSingleWordOperand(4);
   auto y = inst.GetSingleWordOperand(5);
+  // pown/rootn/ldexp take a *signed* integer as their second argument, while
+  // the first argument and the result stay floating-point. The all-or-nothing
+  // signed handling below would reinterpret every operand and the result, so
+  // cast just the exponent to the matching signed integer type.
+  if (extinst == OpenCLLIB::Pown || extinst == OpenCLLIB::Rootn ||
+      extinst == OpenCLLIB::Ldexp) {
+    return gExtendedInstructionsBinary.at(extinst).first + "(" + var_for(x) +
+           ", " + src_as_signed(y) + ")";
+  }
   auto fn_signed = gExtendedInstructionsBinary.at(extinst);
   if (fn_signed.second) {
     return src_as(rtype, src_function_call_signed(fn_signed.first, x, y));

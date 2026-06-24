@@ -1,0 +1,26 @@
+; pown/rootn/ldexp take a *signed* integer as their second argument. spirv2clc
+; defaults integer types to unsigned, so the exponent must be cast to a signed
+; type or the builtin overload won't match (e.g. clang: no matching function
+; for call to 'rootn' ... no known conversion from 'uint' to 'int').
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+        %ext = OpExtInstImport "OpenCL.std"
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+       %void = OpTypeVoid
+        %f32 = OpTypeFloat 32
+        %i32 = OpTypeInt 32 0
+    %p_g_f32 = OpTypePointer CrossWorkgroup %f32
+       %fnty = OpTypeFunction %void %p_g_f32 %f32 %i32
+          %k = OpFunction %void None %fnty
+        %out = OpFunctionParameter %p_g_f32
+          %x = OpFunctionParameter %f32
+          %n = OpFunctionParameter %i32
+        %lbl = OpLabel
+          %r = OpExtInst %f32 %ext rootn %x %n
+               OpStore %out %r
+               OpReturn
+               OpFunctionEnd
+; CHECK: rootn({{.*}}, as_int(
