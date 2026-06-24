@@ -255,6 +255,10 @@ private:
   // ("add", "inc", ...) from the atomic pointer's pointee width.
   std::string atomic_builtin(const std::string &op, uint32_t ptr) const;
 
+  // The CLK_*_MEM_FENCE flags string for a SPIR-V memory-semantics mask (empty
+  // if no memory class is set). Shared by the barrier and fence instructions.
+  std::string fence_flags(uint32_t mem_sem) const;
+
   std::string src_pointer_type(uint32_t storage, uint32_t tyid, bool signedty) const;
 
   std::string src_aggregate_element_type(uint32_t tyid) const;

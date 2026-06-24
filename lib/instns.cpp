@@ -63,6 +63,24 @@ std::string translator::atomic_builtin(const std::string &op,
   return (is64 ? "atom_" : "atomic_") + op;
 }
 
+std::string translator::fence_flags(uint32_t mem_sem) const {
+  std::string flags;
+  auto add = [&](const char *f) {
+    flags += flags.empty() ? "" : " | ";
+    flags += f;
+  };
+  if (mem_sem & SpvMemorySemanticsWorkgroupMemoryMask) {
+    add("CLK_LOCAL_MEM_FENCE");
+  }
+  if (mem_sem & SpvMemorySemanticsCrossWorkgroupMemoryMask) {
+    add("CLK_GLOBAL_MEM_FENCE");
+  }
+  if (mem_sem & SpvMemorySemanticsImageMemoryMask) {
+    add("CLK_IMAGE_MEM_FENCE");
+  }
+  return flags;
+}
+
 bool translator::translate_instruction(const Instruction &inst,
                                        std::string &src) {
   auto opcode = inst.opcode();
@@ -811,21 +829,8 @@ bool translator::translate_instruction(const Instruction &inst,
 
     // The fence flags come from the memory semantics (Workgroup memory -> local
     // fence, CrossWorkgroup memory -> global fence), not the memory scope.
-    // Accept any combination, including both set together, which is the common
-    // barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE).
     auto mem_sem = mem_sem_cst->GetU32();
-    std::string flags;
-    if (mem_sem & SpvMemorySemanticsWorkgroupMemoryMask) {
-      flags = "CLK_LOCAL_MEM_FENCE";
-    }
-    if (mem_sem & SpvMemorySemanticsCrossWorkgroupMemoryMask) {
-      flags += flags.empty() ? "" : " | ";
-      flags += "CLK_GLOBAL_MEM_FENCE";
-    }
-    if (mem_sem & SpvMemorySemanticsImageMemoryMask) {
-      flags += flags.empty() ? "" : " | ";
-      flags += "CLK_IMAGE_MEM_FENCE";
-    }
+    std::string flags = fence_flags(mem_sem);
     if (flags.empty()) {
       std::cerr << "UNIMPLEMENTED OpControlBarrier with memory semantics "
                 << mem_sem << std::endl;
@@ -833,6 +838,29 @@ bool translator::translate_instruction(const Instruction &inst,
     }
 
     src = src_function_call(barrier_fn, flags);
+    break;
+  }
+  case spv::Op::OpMemoryBarrier: {
+    // Standalone fence: operands <Memory scope> <Memory Semantics>. Map to
+    // mem_fence with the corresponding CLK_*_MEM_FENCE flags.
+    auto memory_semantics = inst.GetSingleWordOperand(1);
+    auto mem_sem_cst =
+        m_ir->get_constant_mgr()->FindDeclaredConstant(memory_semantics);
+    if (mem_sem_cst == nullptr) {
+      std::cerr
+          << "UNIMPLEMENTED OpMemoryBarrier with non-constant memory semantics"
+          << std::endl;
+      return false;
+    }
+    auto mem_sem = mem_sem_cst->GetU32();
+    std::string flags = fence_flags(mem_sem);
+    if (flags.empty()) {
+      std::cerr << "UNIMPLEMENTED OpMemoryBarrier with memory semantics "
+                << mem_sem << std::endl;
+      return false;
+    }
+    assign_result = false;
+    src = src_function_call("mem_fence", flags);
     break;
   }
   case spv::Op::OpGroupNonUniformShuffle:

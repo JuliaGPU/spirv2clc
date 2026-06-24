@@ -1,0 +1,20 @@
+; OpMemoryBarrier is a standalone fence; map it to mem_fence with the
+; CLK_*_MEM_FENCE flags derived from the memory semantics (the same mapping the
+; OpControlBarrier fence uses).
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+        %dev = OpConstant %uint 1
+        %sem = OpConstant %uint 784
+       %fnty = OpTypeFunction %void
+          %k = OpFunction %void None %fnty
+        %lbl = OpLabel
+               OpMemoryBarrier %dev %sem
+               OpReturn
+               OpFunctionEnd
+; CHECK: mem_fence(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE)
