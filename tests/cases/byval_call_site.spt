@@ -1,0 +1,34 @@
+; A ByVal struct parameter is emitted by value in the callee signature, so the
+; pointer argument at the call site must be dereferenced. A sibling non-ByVal
+; pointer parameter must stay pass-by-pointer (per-parameter discrimination).
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+               OpCapability Kernel
+               OpCapability Addresses
+               OpDecorate %sparam FuncParamAttr ByVal
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+          %S = OpTypeStruct %uint
+       %pf_S = OpTypePointer Function %S
+    %pg_uint = OpTypePointer CrossWorkgroup %uint
+      %fty_f = OpTypeFunction %void %pf_S %pg_uint
+        %kty = OpTypeFunction %void %pg_uint
+          %f = OpFunction %void None %fty_f
+     %sparam = OpFunctionParameter %pf_S
+     %pparam = OpFunctionParameter %pg_uint
+        %fbb = OpLabel
+               OpReturn
+               OpFunctionEnd
+          %k = OpFunction %void None %kty
+         %kp = OpFunctionParameter %pg_uint
+        %kbb = OpLabel
+      %local = OpVariable %pf_S Function
+       %call = OpFunctionCall %void %f %local %kp
+               OpReturn
+               OpFunctionEnd
+; Callee takes the struct by value and the second arg by pointer:
+; CHECK: void {{[A-Za-z0-9_]+}}(struct {{[A-Za-z0-9_]+}} {{[A-Za-z0-9_]+}}_value, uint global*
+; Call site dereferences only the by-value argument:
+; CHECK: {{[A-Za-z0-9_]+}}((*{{[A-Za-z0-9_]+}}),

@@ -132,12 +132,25 @@ bool translator::translate_instruction(const Instruction &inst,
   }
   case spv::Op::OpFunctionCall: {
     auto func = inst.GetSingleWordOperand(2);
+    // The callee's by-value (ByVal) parameters are emitted by value in its
+    // signature, so dereference the matching pointer argument at the call site.
+    std::vector<uint32_t> callee_params;
+    if (auto *callee = m_ir->GetFunction(func)) {
+      callee->ForEachParam(
+          [&](const Instruction *p) { callee_params.push_back(p->result_id()); });
+    }
     sval = var_for(func) + "(";
     const char *sep = "";
     for (unsigned i = 3; i < inst.NumOperands(); i++) {
       auto param = inst.GetSingleWordOperand(i);
+      unsigned argidx = i - 3;
       sval += sep;
-      sval += var_for(param);
+      if (argidx < callee_params.size() &&
+          m_byval_params.count(callee_params[argidx])) {
+        sval += "(*" + var_for(param) + ")";
+      } else {
+        sval += var_for(param);
+      }
       sep = ", ";
     }
     // Pass down the local-pointer parameters the callee expects for the
