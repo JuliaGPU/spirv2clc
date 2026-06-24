@@ -283,6 +283,11 @@ bool translator::translate_execution_modes() {
     case SpvExecutionModeSubgroupSize:
       m_entry_points_subgroup_size[ep] = em.GetSingleWordOperand(2);
       break;
+    // Optimization hints with no semantic effect (vec_type_hint,
+    // work_group_size_hint). Accept and drop them rather than abort the module.
+    case SpvExecutionModeVecTypeHint:
+    case SpvExecutionModeLocalSizeHint:
+      break;
     default:
       std::cerr << "UNIMPLEMENTED execution mode " << mode << ".\n";
       return false;

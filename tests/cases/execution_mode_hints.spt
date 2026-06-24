@@ -1,0 +1,17 @@
+; VecTypeHint and LocalSizeHint (work_group_size_hint) are optimization hints
+; with no semantic effect. They must not abort translation of the module.
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+               OpCapability Kernel
+               OpCapability Addresses
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k"
+               OpExecutionMode %k VecTypeHint 2
+               OpExecutionMode %k LocalSizeHint 8 16 32
+       %void = OpTypeVoid
+       %fnty = OpTypeFunction %void
+          %k = OpFunction %void None %fnty
+         %bb = OpLabel
+               OpReturn
+               OpFunctionEnd
+; CHECK: kernel k(
