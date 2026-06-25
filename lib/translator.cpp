@@ -568,7 +568,7 @@ void translator::compute_workgroup_params() {
     // order is identical in the prototype, the definition and at the call sites.
     std::set<uint32_t> used;
     IRContext::ProcessFunction collect =
-        [this, &used, defuse](Function *f) -> bool {
+        [&used, defuse](Function *f) -> bool {
       for (auto &bb : *f) {
         for (auto &inst : bb) {
           for (auto &op : inst) {
@@ -931,7 +931,7 @@ int translator::translate(const std::string &assembly, std::string *srcout) {
   int ret = translate();
 
   if (ret == 0) {
-    *srcout = std::move(m_src.str());
+    *srcout = m_src.str();
   }
 
   return ret;
@@ -950,7 +950,7 @@ int translator::translate(const std::vector<uint32_t> &binary,
   int ret = translate();
 
   if (ret == 0) {
-    *srcout = std::move(m_src.str());
+    *srcout = m_src.str();
   }
 
   return ret;
