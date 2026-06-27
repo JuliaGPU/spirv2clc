@@ -310,8 +310,19 @@ bool translator::translate_types_values() {
           uint32_t w0 = op_val.words[0];
           cl_half h = w0 & 0xFFFF;
           float val = cl_half_to_float(h);
-          out.precision(11);
-          out << std::fixed << val << "h";
+          // INFINITY/NAN are float macros; cast to half (the "infh"/"nanh" that
+          // a plain "<< val << \"h\"" would spell is not a valid literal).
+          if (std::isinf(val)) {
+            if (std::signbit(val)) {
+              out << "-";
+            }
+            out << "(half)INFINITY";
+          } else if (std::isnan(val)) {
+            out << "(half)NAN";
+          } else {
+            out.precision(11);
+            out << std::fixed << val << "h";
+          }
         } else if (width == 32) {
           uint32_t w0 = op_val.words[0];
           float val;

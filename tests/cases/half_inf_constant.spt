@@ -1,0 +1,24 @@
+; INFINITY/NAN are float macros, so a half Inf/NaN constant must be cast to
+; half; a plain "<val>h" literal would spell the invalid identifier "infh".
+; RUN: %spirv2clc --asm --spirv-version=1.4 %s | %clang -c -cl-std=CL3.0 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm --spirv-version=1.4 %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Float16
+        %ext = OpExtInstImport "OpenCL.std"
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+       %void = OpTypeVoid
+       %half = OpTypeFloat 16
+      %p_g_h = OpTypePointer CrossWorkgroup %half
+       %zero = OpConstant %half 0
+        %inf = OpConstant %half 0x1p+16
+       %fnty = OpTypeFunction %void %p_g_h
+          %k = OpFunction %void None %fnty
+        %out = OpFunctionParameter %p_g_h
+        %lbl = OpLabel
+          %r = OpExtInst %half %ext copysign %zero %inf
+               OpStore %out %r
+               OpReturn
+               OpFunctionEnd
+; CHECK: (half)INFINITY
