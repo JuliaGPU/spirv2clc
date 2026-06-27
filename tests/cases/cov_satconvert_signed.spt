@@ -1,0 +1,33 @@
+; Saturating integer conversions that change signedness. SPIR-V Kernel integers
+; are all unsigned-typed, so the signedness lives in the opcode:
+;  - OpSatConvertSToU: signed source -> unsigned dest. The operand must be
+;    reinterpreted as signed (as_int) so negatives saturate to 0, not to a huge
+;    positive; the destination is the unsigned result type (convert_uchar_sat).
+;  - OpSatConvertUToS: unsigned source -> signed dest. The operand is taken
+;    as-is and the destination is the signed result type (convert_char_sat).
+; (Previously both were emitted with the source/dest signedness swapped.)
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Linkage
+               OpCapability Int8
+               OpMemoryModel Physical64 OpenCL
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+      %uchar = OpTypeInt 8 0
+      %p_g_c = OpTypePointer CrossWorkgroup %uchar
+       %fnty = OpTypeFunction %void %uint %p_g_c %p_g_c
+         %fn = OpFunction %void None %fnty
+          %a = OpFunctionParameter %uint
+       %outu = OpFunctionParameter %p_g_c
+       %outs = OpFunctionParameter %p_g_c
+        %lbl = OpLabel
+        %su = OpSatConvertSToU %uchar %a
+        %us = OpSatConvertUToS %uchar %a
+               OpStore %outu %su
+               OpStore %outs %us
+               OpReturn
+               OpFunctionEnd
+; CHECK: = convert_uchar_sat(as_int({{v[0-9]+}}));
+; CHECK: = convert_char_sat({{v[0-9]+}});
