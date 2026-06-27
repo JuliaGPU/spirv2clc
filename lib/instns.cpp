@@ -672,18 +672,60 @@ bool translator::translate_instruction(const Instruction &inst,
     sval = src_function_call("islessgreater", op1, op2);
     break;
   }
-  case spv::Op::OpFOrdEqual:
+  // Unordered float comparisons (OpFUnord*) are true when either operand is
+  // NaN, and OpFOrdNotEqual is false for NaN -- but the C/OpenCL C relational
+  // operators "< <= > >= ==" are *ordered* (false for NaN) while only "!=" is
+  // unordered. Translating these as plain operators (as translate_binop does
+  // for the remaining, correct cases below) drops the NaN semantics, so emit
+  // NaN-correct forms built from the OpenCL ordered relational built-ins.
   case spv::Op::OpFOrdNotEqual:
+  case spv::Op::OpFUnordEqual:
+  case spv::Op::OpFUnordLessThan:
+  case spv::Op::OpFUnordGreaterThan:
+  case spv::Op::OpFUnordLessThanEqual:
+  case spv::Op::OpFUnordGreaterThanEqual: {
+    auto op1 = inst.GetSingleWordOperand(2);
+    auto op2 = inst.GetSingleWordOperand(3);
+    boolean_result = true;
+    boolean_result_src_type = src_type_boolean_for_val(op1);
+    const char *ordered = nullptr;
+    switch (opcode) {
+    case spv::Op::OpFOrdNotEqual:
+      // ordered "!=" is islessgreater (false when either operand is NaN)
+      sval = src_function_call("islessgreater", op1, op2);
+      break;
+    case spv::Op::OpFUnordEqual:
+      ordered = "isequal";
+      break;
+    case spv::Op::OpFUnordLessThan:
+      ordered = "isless";
+      break;
+    case spv::Op::OpFUnordGreaterThan:
+      ordered = "isgreater";
+      break;
+    case spv::Op::OpFUnordLessThanEqual:
+      ordered = "islessequal";
+      break;
+    case spv::Op::OpFUnordGreaterThanEqual:
+      ordered = "isgreaterequal";
+      break;
+    default:
+      break;
+    }
+    if (ordered) {
+      // unordered cmp == isunordered(a,b) | <ordered cmp>(a,b); the bitwise OR
+      // is correct for both scalar (1/0) and vector (-1/0) relational results.
+      sval = src_function_call("isunordered", op1, op2) + " | " +
+             src_function_call(ordered, op1, op2);
+    }
+    break;
+  }
+  case spv::Op::OpFOrdEqual:
   case spv::Op::OpFOrdLessThan:
   case spv::Op::OpFOrdGreaterThan:
   case spv::Op::OpFOrdLessThanEqual:
   case spv::Op::OpFOrdGreaterThanEqual:
-  case spv::Op::OpFUnordEqual:
   case spv::Op::OpFUnordNotEqual:
-  case spv::Op::OpFUnordLessThan:
-  case spv::Op::OpFUnordGreaterThan:
-  case spv::Op::OpFUnordLessThanEqual:
-  case spv::Op::OpFUnordGreaterThanEqual:
   case spv::Op::OpLogicalOr:
   case spv::Op::OpLogicalAnd:
   case spv::Op::OpULessThan:
@@ -1127,18 +1169,16 @@ std::string translator::translate_binop(const Instruction &inst) const {
       {spv::Op::OpVectorTimesScalar, "*"},
       {spv::Op::OpShiftLeftLogical, "<<"},
       {spv::Op::OpShiftRightLogical, ">>"},
+      // Ordered float comparisons map directly to the (ordered) C operators.
+      // OpFUnordNotEqual maps to "!=" because C "!=" is itself unordered (true
+      // for NaN). The other unordered comparisons and OpFOrdNotEqual need
+      // NaN-aware handling and are emitted separately (see translate_instruction).
       {spv::Op::OpFOrdEqual, "=="},
-      {spv::Op::OpFUnordEqual, "=="},
-      {spv::Op::OpFOrdNotEqual, "!="},
       {spv::Op::OpFUnordNotEqual, "!="},
       {spv::Op::OpFOrdLessThan, "<"},
-      {spv::Op::OpFUnordLessThan, "<"},
       {spv::Op::OpFOrdGreaterThan, ">"},
-      {spv::Op::OpFUnordGreaterThan, ">"},
       {spv::Op::OpFOrdLessThanEqual, "<="},
-      {spv::Op::OpFUnordLessThanEqual, "<="},
       {spv::Op::OpFOrdGreaterThanEqual, ">="},
-      {spv::Op::OpFUnordGreaterThanEqual, ">="},
   };
 
   auto v1 = inst.GetSingleWordOperand(2);

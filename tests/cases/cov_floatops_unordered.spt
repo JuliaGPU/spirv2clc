@@ -1,0 +1,68 @@
+; Float comparison ordering vs NaN. SPIR-V OpFUnord* are true when an operand
+; is NaN and OpFOrdNotEqual is false for NaN, but the C/OpenCL C relational
+; operators "< <= > >= ==" are ordered (false for NaN) while only "!=" is
+; unordered. So OpFOrdNotEqual must become islessgreater(), and each OpFUnord*
+; (except OpFUnordNotEqual, which matches C "!=") must be widened with
+; isunordered() so it stays true for NaN. Regression for clamp(NaN,-1,1)
+; returning 1.0 instead of NaN (gpuarrays statistics `cor`).
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Linkage
+               OpMemoryModel Physical64 OpenCL
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+        %f32 = OpTypeFloat 32
+       %bool = OpTypeBool
+     %v4float = OpTypeVector %f32 4
+      %v4bool = OpTypeVector %bool 4
+      %p_g_u = OpTypePointer CrossWorkgroup %uint
+       %zero = OpConstant %uint 0
+        %one = OpConstant %uint 1
+       %fnty = OpTypeFunction %void %f32 %f32 %v4float %v4float %p_g_u
+         %fn = OpFunction %void None %fnty
+          %a = OpFunctionParameter %f32
+          %b = OpFunctionParameter %f32
+          %u = OpFunctionParameter %v4float
+          %v = OpFunctionParameter %v4float
+        %out = OpFunctionParameter %p_g_u
+        %lbl = OpLabel
+        %oeq = OpFOrdEqual %bool %a %b
+        %one2 = OpFOrdNotEqual %bool %a %b
+        %ole = OpFOrdLessThanEqual %bool %a %b
+        %une = OpFUnordNotEqual %bool %a %b
+        %ueq = OpFUnordEqual %bool %a %b
+        %ult = OpFUnordLessThan %bool %a %b
+        %ule = OpFUnordLessThanEqual %bool %a %b
+        %ugt = OpFUnordGreaterThan %bool %a %b
+        %uge = OpFUnordGreaterThanEqual %bool %a %b
+        %vule = OpFUnordLessThanEqual %v4bool %u %v
+        %vany = OpAny %bool %vule
+        %r0 = OpSelect %uint %oeq %one %zero
+        %r1 = OpSelect %uint %one2 %one %zero
+        %r2 = OpSelect %uint %ole %one %zero
+        %r3 = OpSelect %uint %une %one %zero
+        %r4 = OpSelect %uint %ueq %one %zero
+        %r5 = OpSelect %uint %ult %one %zero
+        %r6 = OpSelect %uint %ule %one %zero
+        %r7 = OpSelect %uint %ugt %one %zero
+        %r8 = OpSelect %uint %uge %one %zero
+        %r9 = OpSelect %uint %vany %one %zero
+               OpStore %out %r0
+               OpReturn
+               OpFunctionEnd
+; ordered comparisons stay as plain (ordered) operators
+; CHECK: = {{v[0-9]+}} == {{v[0-9]+}};
+; CHECK: = islessgreater({{v[0-9]+}}, {{v[0-9]+}});
+; CHECK: = {{v[0-9]+}} <= {{v[0-9]+}};
+; OpFUnordNotEqual matches C "!=" (already unordered)
+; CHECK: = {{v[0-9]+}} != {{v[0-9]+}};
+; the unordered comparisons stay true for NaN via isunordered()
+; CHECK: = isunordered({{v[0-9]+}}, {{v[0-9]+}}) | isequal({{v[0-9]+}}, {{v[0-9]+}});
+; CHECK: = isunordered({{v[0-9]+}}, {{v[0-9]+}}) | isless({{v[0-9]+}}, {{v[0-9]+}});
+; CHECK: = isunordered({{v[0-9]+}}, {{v[0-9]+}}) | islessequal({{v[0-9]+}}, {{v[0-9]+}});
+; CHECK: = isunordered({{v[0-9]+}}, {{v[0-9]+}}) | isgreater({{v[0-9]+}}, {{v[0-9]+}});
+; CHECK: = isunordered({{v[0-9]+}}, {{v[0-9]+}}) | isgreaterequal({{v[0-9]+}}, {{v[0-9]+}});
+; and the same widening applies to vector comparisons
+; CHECK: = isunordered({{v[0-9]+}}, {{v[0-9]+}}) | islessequal({{v[0-9]+}}, {{v[0-9]+}});
