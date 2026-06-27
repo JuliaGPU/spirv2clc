@@ -96,6 +96,15 @@ private:
         return src_function_call("get_sub_group_id");
       case SpvBuiltInSubgroupLocalInvocationId:
         return src_function_call("get_sub_group_local_id");
+      case SpvBuiltInGlobalInvocationId:
+      case SpvBuiltInGlobalOffset:
+      case SpvBuiltInGlobalSize:
+      case SpvBuiltInWorkgroupId:
+      case SpvBuiltInWorkgroupSize:
+      case SpvBuiltInLocalInvocationId:
+      case SpvBuiltInNumWorkgroups:
+        // Vector built-in used as a whole value (e.g. an OpPhi incoming).
+        return builtin_vector(id);
       default:
         return note_unsupported("builtin value " +
                                 std::to_string(m_builtin_values.at(id)));
@@ -296,6 +305,11 @@ private:
   std::string src_aggregate_element_value(uint32_t tyid, uint32_t object) const;
 
   std::string builtin_vector_extract(uint32_t id, uint32_t idx, bool constant) const;
+
+  // Materialize a whole vector built-in load (e.g. WorkgroupId) as a vector
+  // literal of its per-dimension queries, used when the load is consumed as a
+  // whole value (OpPhi incoming, store, ...) rather than component-extracted.
+  std::string builtin_vector(uint32_t id) const;
 
   bool is_valid_identifier(const std::string& name) const;
   std::string make_valid_identifier(const std::string& name) const;

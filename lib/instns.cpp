@@ -1220,3 +1220,19 @@ std::string translator::builtin_vector_extract(uint32_t id, uint32_t idx, bool c
     return "UNIMPLEMENTED";
   }
 }
+
+std::string translator::builtin_vector(uint32_t id) const {
+  auto type = type_for_val(id);
+  auto vec = type ? type->AsVector() : nullptr;
+  if (!vec) {
+    std::cerr << "UNIMPLEMENTED non-vector built-in value" << std::endl;
+    return "UNIMPLEMENTED";
+  }
+  // (typeN)(query(0), query(1), ..., query(N-1))
+  std::string sval = "(" + src_type(type_id_for(id)) + ")(";
+  for (uint32_t i = 0; i < vec->element_count(); i++) {
+    sval += (i ? ", " : "") + builtin_vector_extract(id, i, true);
+  }
+  sval += ")";
+  return sval;
+}

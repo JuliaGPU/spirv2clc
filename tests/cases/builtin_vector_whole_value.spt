@@ -1,0 +1,34 @@
+; A work-item builtin vector load consumed as a whole value (here carried
+; through an OpPhi rather than OpCompositeExtract'ing a component) lowers to a
+; vector literal of its per-dimension queries, e.g.
+; (ulong3)(get_local_id(0), get_local_id(1), get_local_id(2)).
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k" %lid
+               OpDecorate %lid BuiltIn LocalInvocationId
+       %void = OpTypeVoid
+       %bool = OpTypeBool
+       %uint = OpTypeInt 32 0
+      %uint3 = OpTypeVector %uint 3
+    %p_in_v3 = OpTypePointer Input %uint3
+    %p_g_uint = OpTypePointer CrossWorkgroup %uint
+   %p_g_uint3 = OpTypePointer CrossWorkgroup %uint3
+       %true = OpConstantTrue %bool
+        %lid = OpVariable %p_in_v3 Input
+       %fnty = OpTypeFunction %void %p_g_uint3
+          %k = OpFunction %void None %fnty
+        %out = OpFunctionParameter %p_g_uint3
+      %entry = OpLabel
+          %v = OpLoad %uint3 %lid
+               OpBranchConditional %true %then %merge
+       %then = OpLabel
+               OpBranch %merge
+      %merge = OpLabel
+        %phi = OpPhi %uint3 %v %entry %v %then
+               OpStore %out %phi
+               OpReturn
+               OpFunctionEnd
+; CHECK: (uint3)(get_local_id(0), get_local_id(1), get_local_id(2))
