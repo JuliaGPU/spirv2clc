@@ -641,11 +641,21 @@ bool translator::translate_instruction(const Instruction &inst,
   case spv::Op::OpBitwiseAnd:
     sval = translate_binop(inst);
     break;
-  case spv::Op::OpFMod:
   case spv::Op::OpFRem: {
+    // OpFRem: remainder with the sign of operand 1 -- exactly C/OpenCL fmod().
     auto op1 = inst.GetSingleWordOperand(2);
     auto op2 = inst.GetSingleWordOperand(3);
     sval = src_function_call("fmod", op1, op2);
+    break;
+  }
+  case spv::Op::OpFMod: {
+    // OpFMod: remainder with the sign of operand 2 (the divisor) -- this is the
+    // floored modulo "a - b*floor(a/b)", NOT fmod() (which takes the sign of
+    // operand 1). They differ whenever the operands have opposite signs.
+    auto op1 = inst.GetSingleWordOperand(2);
+    auto op2 = inst.GetSingleWordOperand(3);
+    auto a = var_for(op1), b = var_for(op2);
+    sval = a + " - " + b + " * floor(" + a + " / " + b + ")";
     break;
   }
   case spv::Op::OpSNegate:
