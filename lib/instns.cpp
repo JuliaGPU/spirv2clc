@@ -530,68 +530,39 @@ bool translator::translate_instruction(const Instruction &inst,
   }
   case spv::Op::OpCompositeExtract: {
     auto comp = inst.GetSingleWordOperand(2);
-    auto idx = inst.GetSingleWordOperand(3); // FIXME support multiple indices
     if (m_builtin_values.count(comp)) {
-      sval = builtin_vector_extract(comp, idx, true);
+      // Built-in values are vectors of scalars, so there is a single index.
+      sval = builtin_vector_extract(comp, inst.GetSingleWordOperand(3), true);
       break;
     }
-    auto type = type_for_val(comp);
-    switch (type->kind()) {
-    case Type::Kind::kVector: {
-      sval = src_vec_comp(comp, idx);
-      break;
-    }
-    case Type::Kind::kArray: {
-      // Arrays are struct-wrapped; index through the 'e' member.
-      sval = var_for(comp) + ".e[" + std::to_string(idx) + "]";
-      break;
-    }
-    case Type::Kind::kStruct: {
-      sval = var_for(comp) + ".m" + std::to_string(idx);
-      break;
-    }
-    default:
-      std::cerr << "UNIMPLEMENTED OpCompositeExtract, type " << type->kind()
-                << std::endl;
+    std::string path;
+    uint32_t leaf_tyid;
+    if (!src_composite_path(inst, 3, type_id_for(comp), path, leaf_tyid)) {
       return false;
+    }
+    sval = var_for(comp) + path;
+    // Pointer leaves are stored as integers (see src_aggregate_element_type),
+    // so turn them back into the pointer type on the way out.
+    if (type_for(leaf_tyid)->kind() == Type::Kind::kPointer) {
+      sval = src_cast(rtype, sval);
     }
     break;
   }
   case spv::Op::OpCompositeInsert: {
     auto object = inst.GetSingleWordOperand(2);
     auto composite = inst.GetSingleWordOperand(3);
-    auto index = inst.GetSingleWordOperand(4);
 
-    if (inst.NumOperands() > 5) {
-      std::cerr << "UNIMPLEMENTED OpCompositeInsert with multiple indices"
-                << std::endl;
+    std::string path;
+    uint32_t leaf_tyid;
+    if (!src_composite_path(inst, 4, rtype, path, leaf_tyid)) {
       return false;
     }
 
     assign_result = false;
     src = src_type(rtype) + " " + var_for(result) + " = " + var_for(composite) +
           "; ";
-    auto type = type_for(rtype);
-    switch (type->kind()) {
-    case Type::Kind::kVector:
-      src += src_vec_comp(result, index) + " = " + var_for(object);
-      break;
-    case Type::Kind::kArray:
-      // Arrays are struct-wrapped; index through the 'e' member.
-      src += var_for(result) + ".e[" + std::to_string(index) + "] = " +
-             src_aggregate_element_value(
-                 type_id_for(type->AsArray()->element_type()), object);
-      break;
-    case Type::Kind::kStruct:
-      src += var_for(result) + ".m" + std::to_string(index) + " = " +
-             src_aggregate_element_value(
-                 type_id_for(type->AsStruct()->element_types()[index]), object);
-      break;
-    default:
-      std::cerr << "UNIMPLEMENTED OpCompositeInsert, type " << type->kind()
-                << std::endl;
-      return false;
-    }
+    src += var_for(result) + path + " = " +
+           src_aggregate_element_value(leaf_tyid, object);
     break;
   }
   case spv::Op::OpCompositeConstruct: {

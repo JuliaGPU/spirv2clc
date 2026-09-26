@@ -1,0 +1,30 @@
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+; Pointers are forbidden inside OpenCL C aggregates, so spirv2clc encodes a
+; pointer leaf as a same-width integer (ulong). Reading such a leaf with
+; OpCompositeExtract must cast the integer back to the pointer type, mirroring
+; the cast on write (see composite_insert_pointer_leaf.spt); a bare assignment
+; is an "incompatible integer to pointer conversion" that real drivers reject.
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Int64
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+     %uint_0 = OpConstant %uint 0
+      %p_g_u = OpTypePointer CrossWorkgroup %uint
+      %inner = OpTypeStruct %uint %p_g_u
+      %outer = OpTypeStruct %uint %inner
+      %undef = OpUndef %outer
+       %fnty = OpTypeFunction %void %p_g_u
+          %k = OpFunction %void None %fnty
+        %out = OpFunctionParameter %p_g_u
+        %lbl = OpLabel
+        %ins = OpCompositeInsert %outer %out %undef 1 1
+          %p = OpCompositeExtract %p_g_u %ins 1 1
+               OpStore %p %uint_0
+               OpReturn
+               OpFunctionEnd
+; CHECK: .m1.m1 = (ulong)(
+; CHECK: global* {{v[0-9]+}} = ((ma{{[0-9]+}} global*){{v[0-9]+}}.m1.m1);

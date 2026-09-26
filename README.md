@@ -154,4 +154,3 @@ All control flow is translated to `goto`'s.
 - No support for images
 - No support for relaxed atomics
 - Nesting of arrays and structures probably needs more work
-- OpCompositeExtract doesn't support multiple indices
