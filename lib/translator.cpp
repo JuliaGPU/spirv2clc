@@ -913,6 +913,7 @@ bool translator::validate_module(const std::vector<uint32_t> &binary) const {
   spv_context ctx = spvContextCreate(m_target_env);
   spv_result_t res =
       spvValidateBinary(ctx, binary.data(), binary.size(), &diag);
+  spvContextDestroy(ctx);
   spvDiagnosticPrint(diag);
   spvDiagnosticDestroy(diag);
   if (res != SPV_SUCCESS) {

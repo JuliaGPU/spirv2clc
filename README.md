@@ -1,4 +1,4 @@
-# spirv2clc [![CI badge](https://github.com/kpet/spirv2clc/actions/workflows/presubmit.yml/badge.svg?branch=main)](https://github.com/kpet/spirv2clc/actions/workflows/presubmit.yml?query=branch%3Amain++)
+# spirv2clc [![CI badge](https://github.com/JuliaGPU/spirv2clc/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/JuliaGPU/spirv2clc/actions/workflows/ci.yml?query=branch%3Amain)
 
 spirv2clc is an experimental OpenCL SPIR-V to OpenCL C translator currently
 targeting OpenCL 1.2 support. It can generate OpenCL C code equivalent to an
@@ -39,8 +39,10 @@ cmake --build build
 # Running the tests
 
 The regression tests are driven by [`lit`](https://pypi.org/project/lit/) and
-require `clang` and `FileCheck` on the `PATH`. After building, run them with
-either:
+require `clang` and `FileCheck` on the `PATH`. The tests compile the translated
+source with that `clang` for the host, so they need a recent version (22 or
+newer) and an x86-64 host (clang cannot compile OpenCL kernels for arm64). After
+building, run them with either:
 
 ```
 ctest --preset default       # or: ctest --test-dir build
