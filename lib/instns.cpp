@@ -541,6 +541,11 @@ bool translator::translate_instruction(const Instruction &inst,
       return false;
     }
     sval = var_for(comp) + path;
+    // Pointer leaves are stored as integers (see src_aggregate_element_type),
+    // so turn them back into the pointer type on the way out.
+    if (type_for(leaf_tyid)->kind() == Type::Kind::kPointer) {
+      sval = src_cast(rtype, sval);
+    }
     break;
   }
   case spv::Op::OpCompositeInsert: {
