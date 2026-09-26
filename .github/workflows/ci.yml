@@ -1,0 +1,190 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# The lit suite compiles every translation with clang, and which OpenCL builtins
+# clang declares by default changes between versions (e.g. clang 22 is the first to
+# declare the cl_khr_subgroup_shuffle ones), so pin the version the tests target.
+env:
+  LLVM_VERSION: 22
+
+jobs:
+  format:
+    name: Formatting
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Install clang-format
+        run: |
+          wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- "$LLVM_VERSION"
+          sudo apt-get install -y "clang-format-$LLVM_VERSION"
+      - name: Check formatting of the changed lines
+        env:
+          # git-clang-format runs the unversioned clang-format unless told otherwise
+          GIT_CLANG_FORMAT: git-clang-format-${{ env.LLVM_VERSION }} --binary clang-format-${{ env.LLVM_VERSION }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: tests/check-format.sh "$(git merge-base "$BASE" HEAD)"
+
+  test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The released binaries are built by Yggdrasil with GCC 10, so build with
+          # that here too to catch C++ it can't handle before a JLL rebuild does.
+          - name: Linux (GCC 10)
+            os: ubuntu-24.04
+            build_type: Release
+            cc: gcc-10
+            cxx: g++-10
+          # Memory errors in the translator surface as garbage source or crashes
+          # far away from their cause, so run the suite under ASan and UBSan too.
+          - name: Linux (ASan+UBSan)
+            os: ubuntu-24.04
+            build_type: Debug
+            cc: gcc
+            cxx: g++
+            cxxflags: -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- "$LLVM_VERSION"
+          # llvm-*-tools provides FileCheck and lit
+          sudo apt-get install -y "llvm-$LLVM_VERSION-tools" ninja-build ${{ matrix.cxx }}
+          echo "/usr/lib/llvm-$LLVM_VERSION/bin" >> "$GITHUB_PATH"
+      # ASan's shadow memory layout breaks with the runners' high mmap ASLR entropy.
+      - name: Reduce ASLR entropy
+        if: matrix.cxxflags
+        run: sudo sysctl vm.mmap_rnd_bits=28
+
+      - name: Configure
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: |
+          clang --version
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DSPIRV2CLC_UPDATE_SUBMODULES=OFF \
+            -DCMAKE_CXX_FLAGS="${{ matrix.cxxflags }}" \
+            -DCMAKE_EXE_LINKER_FLAGS="${{ matrix.cxxflags }}" \
+            -DCMAKE_SHARED_LINKER_FLAGS="${{ matrix.cxxflags }}"
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  # Apple's OpenCL has no IL support, so on macOS OpenCL.jl always goes through
+  # spirv2clc. The lit suite can't run there: clang can't compile OpenCL kernels for
+  # arm64 hosts, so it has to check the output on x86-64. Instead, make sure the
+  # translator (and the test layer) build with AppleClang and libc++, and that the
+  # tool gets through every test input without crashing.
+  macos:
+    name: macOS
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - name: Install dependencies
+        run: brew install ninja
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSPIRV2CLC_UPDATE_SUBMODULES=OFF
+      - name: Build
+        run: cmake --build build
+      - name: Translate the test inputs
+        run: |
+          status=0
+          for f in tests/cases/*.spt; do
+            build/bin/spirv2clc --asm --spirv-version=1.4 --cl-std=CL3.0 "$f" >/dev/null 2>&1 && continue
+            # exit code 1 is a (possibly expected) translation failure; more is a crash
+            rc=$?
+            if [ $rc -gt 1 ]; then
+              echo "::error file=$f::spirv2clc crashed (exit code $rc)"
+              status=1
+            fi
+          done
+          exit $status
+
+  opencl:
+    name: OpenCL.jl (PoCL, OpenCL C)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - name: Install dependencies
+        run: sudo apt-get install -y ninja-build
+
+      # Build the translator the way Yggdrasil does for spirv2clc_jll: the tool only.
+      - name: Build spirv2clc
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSPIRV2CLC_UPDATE_SUBMODULES=OFF \
+            -DBUILD_TESTING=OFF
+          cmake --build build --target spirv2clc
+          cmake --install build --component tools --prefix "$RUNNER_TEMP/spirv2clc"
+
+      - uses: actions/checkout@v7
+        with:
+          repository: JuliaGPU/OpenCL.jl
+          path: OpenCL.jl
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: '1'
+      - uses: julia-actions/cache@v3
+
+      # Point spirv2clc_jll at the binary built above. It isn't a direct dependency of
+      # the test environment, so this also adds it to the `[extras]` there.
+      - name: Use this spirv2clc
+        working-directory: OpenCL.jl
+        run: |
+          julia --project=test --color=yes -e '
+            using Pkg
+            Pkg.instantiate()
+            using Preferences, UUIDs
+            set_preferences!((UUID("f0274c0c-8c8a-59f1-85b7-f7d60330c5fb"), "spirv2clc_jll"),
+                             "spirv2clc_path" => ARGS[1]; force=true)' \
+            "$RUNNER_TEMP/spirv2clc/bin/spirv2clc"
+          cat test/LocalPreferences.toml
+
+      # OpenCL.jl runs every PoCL test twice: `pocl/` through PoCL's SPIR-V support,
+      # and `poclc/` through the OpenCL C source path, i.e. spirv2clc targeting the
+      # device's highest OpenCL C version. Only the latter exercises this repository.
+      - name: Test OpenCL.jl
+        working-directory: OpenCL.jl
+        run: |
+          julia --project=test --color=yes -e '
+            using OpenCL
+            path = OpenCL.spirv2clc_jll.spirv2clc_path
+            startswith(path, ENV["RUNNER_TEMP"]) ||
+                error("spirv2clc_jll override not in effect, got ", path)'
+          julia --project=test --color=yes test/runtests.jl --platform=pocl poclc
