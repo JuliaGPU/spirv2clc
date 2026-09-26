@@ -9,6 +9,41 @@ std::string translator::src_aggregate_element_type(uint32_t tyid) const {
   return src_type(tyid);
 }
 
+bool translator::src_composite_path(const spvtools::opt::Instruction &inst,
+                                    unsigned first, uint32_t tyid,
+                                    std::string &path,
+                                    uint32_t &leaf_tyid) const {
+  path.clear();
+  for (unsigned i = first; i < inst.NumOperands(); i++) {
+    auto idx = inst.GetSingleWordOperand(i);
+    auto type = type_for(tyid);
+    switch (type->kind()) {
+    case Type::Kind::kVector: {
+      std::stringstream scomp;
+      scomp << std::hex << idx;
+      path += ".s" + scomp.str();
+      tyid = type_id_for(type->AsVector()->element_type());
+      break;
+    }
+    case Type::Kind::kArray:
+      // Arrays are struct-wrapped; index through the 'e' member.
+      path += ".e[" + std::to_string(idx) + "]";
+      tyid = type_id_for(type->AsArray()->element_type());
+      break;
+    case Type::Kind::kStruct:
+      path += ".m" + std::to_string(idx);
+      tyid = type_id_for(type->AsStruct()->element_types()[idx]);
+      break;
+    default:
+      std::cerr << "UNIMPLEMENTED composite member access, type "
+                << type->kind() << std::endl;
+      return false;
+    }
+  }
+  leaf_tyid = tyid;
+  return true;
+}
+
 std::string translator::src_aggregate_element_value(uint32_t tyid,
                                                     uint32_t object) const {
   if (type_for(tyid)->kind() == Type::Kind::kPointer) {

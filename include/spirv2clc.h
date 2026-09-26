@@ -349,6 +349,14 @@ private:
   // reconstruction in emit_access_chain.
   std::string src_aggregate_element_value(uint32_t tyid, uint32_t object) const;
 
+  // Render the member path selected by the literal indices of an
+  // OpCompositeExtract/OpCompositeInsert (operands `first` onwards), starting
+  // from a composite of type `tyid`, e.g. ".m1.e[2].s0". Sets `leaf_tyid` to
+  // the type of the selected member.
+  bool src_composite_path(const spvtools::opt::Instruction &inst,
+                          unsigned first, uint32_t tyid, std::string &path,
+                          uint32_t &leaf_tyid) const;
+
   std::string builtin_vector_extract(uint32_t id, uint32_t idx, bool constant) const;
 
   // Materialize a whole vector built-in load (e.g. WorkgroupId) as a vector
