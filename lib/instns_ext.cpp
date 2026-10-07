@@ -203,6 +203,21 @@ bool translator::translate_extended_instruction(const Instruction &inst,
     sval = translate_extended_ternary(inst);
   } else {
     switch (instruction) {
+    case OpenCLLIB::Ctz: {
+      auto x = inst.GetSingleWordOperand(4);
+      if (m_opencl_c_version >= 200) {
+        sval = src_function_call("ctz", x);
+      } else {
+        // ctz is OpenCL C 2.0. `(x & -x) - 1` sets exactly the trailing zero
+        // bits, and all bits for x == 0, where ctz is the bit width. The cast
+        // undoes the promotion of char and short operands to int.
+        auto vx = var_for(x);
+        sval = "popcount(" +
+               src_cast(inst.type_id(), "((" + vx + " & -" + vx + ") - 1)") +
+               ")";
+      }
+      break;
+    }
     case OpenCLLIB::Ilogb: {
       // ilogb returns a signed intn; reinterpret to the (unsigned) result type
       // so a vector assignment type-checks (uintN = intN is not implicit).
