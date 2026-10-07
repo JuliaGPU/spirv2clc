@@ -42,15 +42,17 @@
                OpReturn
                OpFunctionEnd
 ; CHECK: uint iv;
+; CHECK-NEXT: uint iv_phi;
 ; CHECK: entry:
-; CHECK: iv = ((uint)0);
+; CHECK: iv_phi = ((uint)0);
 ; CHECK: goto header;
 ; CHECK: header:
+; CHECK-NEXT: iv = iv_phi;
 ; CHECK: goto body;
 ; CHECK: body:
 ; CHECK: if (cmp) { goto latch;} else { goto exit;}
 ; CHECK: latch:
 ; CHECK: uint next = iv + ((uint)1);
-; CHECK: iv = next;
+; CHECK: iv_phi = next;
 ; CHECK: goto header;
 ; CHECK: exit:

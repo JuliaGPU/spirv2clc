@@ -748,7 +748,13 @@ bool translator::translate_function(Function &func) {
     }
   }
 
-  // First collect information about OpPhi's
+  // Lower OpPhi out of SSA in two phases. Each predecessor stages the incoming
+  // value in a per-phi temporary before its terminator, and the phi block
+  // commits the temporaries to the phi variables on entry. Writing the phi
+  // variables directly in the predecessor would be wrong twice over: the write
+  // also happens when the branch leaves through another edge (the loop exit
+  // then sees the next iteration's value), and sequential writes break when
+  // one phi feeds another of the same block (a swap reads the clobbered value).
   for (auto &bb : func) {
     for (auto &inst : bb) {
       auto result = inst.result_id();
@@ -756,6 +762,7 @@ bool translator::translate_function(Function &func) {
         continue;
       }
       m_phi_vals[&func].push_back(result);
+      m_phi_temps[result] = make_valid_identifier(var_for(result) + "_phi");
 
       for (unsigned i = 2; i < inst.NumOperands(); i += 2) {
         auto var = inst.GetSingleWordOperand(i);
@@ -782,15 +789,24 @@ bool translator::translate_function(Function &func) {
   if (m_phi_vals.count(&func)) {
     for (auto phival : m_phi_vals.at(&func)) {
       auto phitype = type_id_for(phival);
+      // Separate declarations: `T *a, b` would not make b a pointer.
       m_src << "  " << src_type(phitype) << " " << var_for(phival) << ";\n";
+      m_src << "  " << src_type(phitype) << " " << m_phi_temps.at(phival)
+            << ";\n";
     }
   }
   for (auto &bb : func) {
     m_src << var_for(bb.id()) + ":;" << std::endl;
-    // Translate all instructions except the terminator
+    // Translate all instructions except the terminator. The phis lead the
+    // block; each commits the value staged by the predecessor we came from.
     for (auto &inst : bb) {
       if (&inst == bb.terminator()) {
         break;
+      }
+      if (inst.opcode() == spv::Op::OpPhi) {
+        m_src << "  " << var_for(inst.result_id()) << " = "
+              << m_phi_temps.at(inst.result_id()) << ";\n";
+        continue;
       }
       std::string isrc;
       if (!translate_instruction(inst, isrc)) {
@@ -800,11 +816,12 @@ bool translator::translate_function(Function &func) {
         m_src << "  " << isrc << ";\n";
       }
     }
-    // Assign phi variables if this block can branch to other blocks with phi
-    // refering to this block
+    // Stage the incoming values of the successors' phis. Staging for every
+    // successor, not just the one taken, is harmless: a temporary is only read
+    // on entry to its phi's block.
     if (m_phi_assigns.count(&bb)) {
       for (auto &phival_var : m_phi_assigns.at(&bb)) {
-        m_src << "  " << var_for(phival_var.first) << " = "
+        m_src << "  " << m_phi_temps.at(phival_var.first) << " = "
               << var_for(phival_var.second) << ";\n";
       }
     }

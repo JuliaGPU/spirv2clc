@@ -2,8 +2,9 @@
 ; RUN: %spirv2clc --asm %s | %FileCheck %s
 ; Structured if/else diamond: OpBranchConditional + OpSelectionMerge + OpBranch
 ; into a merge block whose value is an OpPhi. The translator lowers blocks to
-; labels with goto and materialises the phi as a predeclared variable assigned
-; in each predecessor.
+; labels with goto and materialises the phi as a predeclared variable: each
+; predecessor stages its incoming value in a temporary, which the merge block
+; commits on entry.
                OpCapability Kernel
                OpCapability Addresses
                OpCapability Linkage
@@ -38,12 +39,14 @@
                OpReturn
                OpFunctionEnd
 ; CHECK: uint res;
+; CHECK-NEXT: uint res_phi;
 ; CHECK: entry:
 ; CHECK: if (cond) { goto then;} else { goto els;}
 ; CHECK: then:
-; CHECK: res = ((uint)1);
+; CHECK: res_phi = ((uint)1);
 ; CHECK: goto merge;
 ; CHECK: els:
-; CHECK: res = ((uint)2);
+; CHECK: res_phi = ((uint)2);
 ; CHECK: goto merge;
 ; CHECK: merge:
+; CHECK-NEXT: res = res_phi;

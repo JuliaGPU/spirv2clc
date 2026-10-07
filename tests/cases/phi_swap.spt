@@ -1,0 +1,49 @@
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+; Two phis of a loop header that exchange values on the back edge. Copying the
+; incoming values straight into the phi variables (a = b; b = a;) reads an
+; already-overwritten value, so the predecessor stages them in temporaries and
+; the header commits those on entry.
+               OpCapability Addresses
+               OpCapability Kernel
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k"
+               OpName %a "a"
+               OpName %b "b"
+               OpName %loop "loop"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+       %bool = OpTypeBool
+        %ptr = OpTypePointer CrossWorkgroup %uint
+         %fn = OpTypeFunction %void %ptr %uint
+     %uint_0 = OpConstant %uint 0
+     %uint_1 = OpConstant %uint 1
+     %uint_2 = OpConstant %uint 2
+          %k = OpFunction %void None %fn
+        %out = OpFunctionParameter %ptr
+          %n = OpFunctionParameter %uint
+      %entry = OpLabel
+               OpBranch %loop
+       %loop = OpLabel
+          %a = OpPhi %uint %uint_1 %entry %b %loop
+          %b = OpPhi %uint %uint_2 %entry %a %loop
+          %i = OpPhi %uint %uint_0 %entry %inext %loop
+      %inext = OpIAdd %uint %i %uint_1
+          %c = OpULessThan %bool %inext %n
+               OpBranchConditional %c %loop %exit
+       %exit = OpLabel
+               OpStore %out %a
+         %o1 = OpInBoundsPtrAccessChain %ptr %out %uint_1
+               OpStore %o1 %b
+               OpReturn
+               OpFunctionEnd
+; CHECK: uint a;
+; CHECK-NEXT: uint a_phi;
+; CHECK: uint b;
+; CHECK-NEXT: uint b_phi;
+; CHECK: loop:;
+; CHECK-NEXT: a = a_phi;
+; CHECK-NEXT: b = b_phi;
+; CHECK: a_phi = b;
+; CHECK-NEXT: b_phi = a;
+; CHECK-NOT: {{^ *}}a = b;

@@ -441,6 +441,7 @@ private:
     m_alignments.clear();
     m_phi_vals.clear();
     m_phi_assigns.clear();
+    m_phi_temps.clear();
     m_sampled_images.clear();
     m_boolean_src_types.clear();
     m_local_variable_decls.clear();
@@ -490,6 +491,8 @@ private:
   std::unordered_map<spvtools::opt::BasicBlock *,
                      std::vector<std::pair<uint32_t, uint32_t>>>
       m_phi_assigns;
+  // Phi value -> the temporary its predecessors stage the incoming value in.
+  std::unordered_map<uint32_t, std::string> m_phi_temps;
   std::unordered_map<uint32_t, std::pair<uint32_t, uint32_t>> m_sampled_images;
   std::unordered_map<uint32_t, std::string>
       m_boolean_src_types; // value, C type name

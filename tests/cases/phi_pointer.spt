@@ -1,0 +1,33 @@
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+; A pointer-typed phi: its variable and the temporary staging its incoming
+; value are declared separately, as `T *p, p_phi` would not make the temporary
+; a pointer.
+               OpCapability Addresses
+               OpCapability Kernel
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k"
+               OpName %p "p"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+       %bool = OpTypeBool
+        %ptr = OpTypePointer CrossWorkgroup %uint
+         %fn = OpTypeFunction %void %ptr %ptr %uint
+     %uint_0 = OpConstant %uint 0
+     %uint_1 = OpConstant %uint 1
+          %k = OpFunction %void None %fn
+          %a = OpFunctionParameter %ptr
+          %b = OpFunctionParameter %ptr
+          %n = OpFunctionParameter %uint
+      %entry = OpLabel
+          %c = OpINotEqual %bool %n %uint_0
+               OpBranchConditional %c %other %merge
+      %other = OpLabel
+               OpBranch %merge
+      %merge = OpLabel
+          %p = OpPhi %ptr %a %entry %b %other
+               OpStore %p %uint_1
+               OpReturn
+               OpFunctionEnd
+; CHECK: [[T:ma[0-9]+ global\*]] p;
+; CHECK-NEXT: [[T]] p_phi;

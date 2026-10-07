@@ -1,0 +1,42 @@
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+; A loop-header phi that is also read after the loop. The latch branches either
+; back to the header or out of the loop; its incoming value for the header must
+; not overwrite the phi itself, or the exit block sees the next iteration's
+; value. The same holds when the exit reads it through an LCSSA phi.
+               OpCapability Addresses
+               OpCapability Kernel
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k"
+               OpName %i "i"
+               OpName %inext "inext"
+               OpName %lcssa "lcssa"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+       %bool = OpTypeBool
+        %ptr = OpTypePointer CrossWorkgroup %uint
+         %fn = OpTypeFunction %void %ptr %uint
+     %uint_0 = OpConstant %uint 0
+     %uint_1 = OpConstant %uint 1
+          %k = OpFunction %void None %fn
+        %out = OpFunctionParameter %ptr
+          %n = OpFunctionParameter %uint
+      %entry = OpLabel
+               OpBranch %loop
+       %loop = OpLabel
+          %i = OpPhi %uint %uint_0 %entry %inext %loop
+      %inext = OpIAdd %uint %i %uint_1
+          %c = OpULessThan %bool %inext %n
+               OpBranchConditional %c %loop %exit
+       %exit = OpLabel
+      %lcssa = OpPhi %uint %i %loop
+               OpStore %out %i
+         %o1 = OpInBoundsPtrAccessChain %ptr %out %uint_1
+               OpStore %o1 %lcssa
+               OpReturn
+               OpFunctionEnd
+; CHECK: uint inext = i + ((uint)1);
+; CHECK: i_phi = inext;
+; CHECK-NEXT: lcssa_phi = i;
+; CHECK: lcssa = lcssa_phi;
+; CHECK-NEXT: *v{{[0-9]+}} = i;
