@@ -140,17 +140,13 @@ c::expr_ref translator_impl::dereference(uint32_t ptr,
 }
 
 bool translator_impl::translate_instruction(const Instruction &inst,
-                                            std::string &src) {
+                                            function_builder &fb) {
   auto opcode = inst.opcode();
   auto rtype = inst.type_id();
   auto result = inst.result_id();
 
   c::expr_ref val;
   bool assign_result = true;
-  // An assignment statement.
-  auto assign = [](c::expr_ref lhs, c::expr_ref rhs) {
-    return c::print(c::binary("=", std::move(lhs), std::move(rhs)));
-  };
 
   switch (opcode) {
   case spv::Op::OpUndef:
@@ -159,10 +155,10 @@ bool translator_impl::translate_instruction(const Instruction &inst,
   case spv::Op::OpUnreachable: // TODO trigger crash? end invocation?
     break;
   case spv::Op::OpReturn:
-    src = "return";
+    fb.statement("return");
     break;
   case spv::Op::OpReturnValue:
-    src = "return " + c::print(value(inst.GetSingleWordOperand(0)));
+    fb.statement("return " + c::print(value(inst.GetSingleWordOperand(0))));
     break;
   case spv::Op::OpFunctionCall: {
     auto func = inst.GetSingleWordOperand(2);
@@ -198,7 +194,7 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     val = c::call(name_of(func), std::move(args));
     if (type_for(rtype)->kind() == Type::Kind::kVoid) {
       assign_result = false;
-      src = c::print(val);
+      fb.expression(val);
     }
     break;
   }
@@ -212,17 +208,13 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     assign_result = false;
     auto varty = type_for(rtype)->AsPointer()->pointee_type();
     auto &storagename = derived_name(result, "_storage");
-    // Declare storage
+    // The variable's value is a pointer to its storage.
     auto tymgr = m_ir->get_type_mgr();
-    src = src_type_memory_object_declaration(tymgr->GetId(varty), result,
-                                             storagename);
-    if (inst.NumOperands() == 4) {
-      src += " = " + c::print(value(inst.GetSingleWordOperand(3)));
-    }
-    src += "; ";
-    // Declare pointer
-    src += src_var_decl(result) + " = " +
-           c::print(c::address_of(c::name(storagename)));
+    fb.declare(src_type_memory_object_declaration(tymgr->GetId(varty), result,
+                                                  storagename),
+               inst.NumOperands() == 4 ? value(inst.GetSingleWordOperand(3))
+                                       : nullptr);
+    fb.declare(src_var_decl(result), c::address_of(c::name(storagename)));
     break;
   }
   case spv::Op::OpLoad: {
@@ -246,8 +238,7 @@ bool translator_impl::translate_instruction(const Instruction &inst,
   case spv::Op::OpStore: {
     auto ptr = inst.GetSingleWordOperand(0);
     auto stored = inst.GetSingleWordOperand(1);
-    src = assign(dereference(ptr, memory_access_operands(inst, 2)),
-                 value(stored));
+    fb.assign(dereference(ptr, memory_access_operands(inst, 2)), value(stored));
     break;
   }
   case spv::Op::OpCopyMemory: {
@@ -272,8 +263,8 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     auto src_ptr_type = std::string(src_vol ? "volatile " : "") +
                         src_access_pointee(tgt_pointee, src_access) + " " +
                         address_space_qualifier(src_storage) + "*";
-    src = assign(dereference(target, tgt_access),
-                 c::deref(c::cast(src_ptr_type, value(source))));
+    fb.assign(dereference(target, tgt_access),
+              c::deref(c::cast(src_ptr_type, value(source))));
     break;
   }
   case spv::Op::OpCopyMemorySized: {
@@ -304,10 +295,11 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     // be shadowed by it.
     auto counter = m_name_allocator.allocate("_i");
     auto i = c::name(counter);
-    src = "for (ulong " + counter + " = 0; " + counter + " < " +
-          c::print(value(size)) + "; ++" + counter + ") " +
-          assign(c::index(byte_pointer(target, tgt_access), i),
-                 c::index(byte_pointer(source, src_access), i));
+    fb.statement(
+        "for (ulong " + counter + " = 0; " + counter + " < " +
+        c::print(value(size)) + "; ++" + counter + ") " +
+        c::print(c::binary("=", c::index(byte_pointer(target, tgt_access), i),
+                           c::index(byte_pointer(source, src_access), i))));
     break;
   }
   case spv::Op::OpConvertPtrToU:
@@ -478,7 +470,7 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     } else {
       auto ptr = inst.GetSingleWordOperand(0);
       auto stored = inst.GetSingleWordOperand(3);
-      src = c::print(
+      fb.expression(
           c::call("atomic_store", {atomic_c11_pointer(ptr), value(stored)}));
     }
     break;
@@ -512,8 +504,8 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     }
 
     assign_result = false;
-    src = src_var_decl(result) + " = " + c::print(value(composite)) + "; ";
-    src += assign(member, to_component(parent_tyid, leaf_tyid, value(object)));
+    fb.declare(src_var_decl(result), value(composite));
+    fb.assign(member, to_component(parent_tyid, leaf_tyid, value(object)));
     break;
   }
   case spv::Op::OpCompositeConstruct: {
@@ -538,7 +530,7 @@ bool translator_impl::translate_instruction(const Instruction &inst,
       val = builtin_vector_extract(vec, value(idx));
     } else {
       val = c::index(c::cast(src_vector_element_type(type_id_for(vec)) + "*",
-                             c::address_of(value(vec))),
+                             c::address_of(materialize(vec, fb))),
                      value(idx));
     }
     break;
@@ -551,8 +543,8 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     auto element = c::index(c::cast(src_vector_element_type(rtype) + "*",
                                     c::address_of(c::name(name_of(result)))),
                             value(idx));
-    src = src_var_decl(result) + " = " + c::print(value(vec)) + "; ";
-    src += assign(element, to_component(rtype, type_id_for(comp), value(comp)));
+    fb.declare(src_var_decl(result), value(vec));
+    fb.assign(element, to_component(rtype, type_id_for(comp), value(comp)));
     break;
   }
   case spv::Op::OpVectorShuffle: {
@@ -837,7 +829,7 @@ bool translator_impl::translate_instruction(const Instruction &inst,
   case spv::Op::OpBranch: {
     auto target = inst.GetSingleWordOperand(0);
     assign_result = false;
-    src = "goto " + name_of(target);
+    fb.statement("goto " + name_of(target));
     break;
   }
   case spv::Op::OpBranchConditional: {
@@ -845,8 +837,9 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     auto label_true = inst.GetSingleWordOperand(1);
     auto label_false = inst.GetSingleWordOperand(2);
     assign_result = false;
-    src = "if (" + c::print(value(cond)) + ") { goto " + name_of(label_true) +
-          ";} else { goto " + name_of(label_false) + ";}";
+    fb.statement("if (" + c::print(value(cond)) + ") { goto " +
+                 name_of(label_true) + ";} else { goto " +
+                 name_of(label_false) + ";}");
     break;
   }
   case spv::Op::OpLoopMerge:      // Nothing to do for now TODO loop controls
@@ -860,15 +853,15 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     assign_result = false;
     auto select = inst.GetSingleWordOperand(0);
     auto def = inst.GetSingleWordOperand(1);
-    src = "switch (" + c::print(value(select)) + "){";
-    src += "default: goto " + name_of(def) + ";";
+    std::string sw = "switch (" + c::print(value(select)) + "){";
+    sw += "default: goto " + name_of(def) + ";";
     for (unsigned i = 2; i < inst.NumOperands(); i += 2) {
       auto &case_val = inst.GetOperand(i);
       auto &target = inst.GetOperand(i + 1);
-      src += "case " + std::to_string(case_val.AsLiteralUint64()) + ": goto " +
-             name_of(target.AsId()) + ";";
+      sw += "case " + std::to_string(case_val.AsLiteralUint64()) + ": goto " +
+            name_of(target.AsId()) + ";";
     }
-    src += "}";
+    fb.statement(sw + "}");
     break;
   }
   case spv::Op::OpControlBarrier: {
@@ -918,7 +911,7 @@ bool translator_impl::translate_instruction(const Instruction &inst,
 
     // The fence flags come from the memory semantics (Workgroup memory -> local
     // fence, CrossWorkgroup memory -> global fence), not the memory scope.
-    src = c::print(c::call(barrier_fn, {fence_flags(mem_sem_cst->GetU32())}));
+    fb.expression(c::call(barrier_fn, {fence_flags(mem_sem_cst->GetU32())}));
     break;
   }
   case spv::Op::OpMemoryBarrier: {
@@ -934,7 +927,7 @@ bool translator_impl::translate_instruction(const Instruction &inst,
       return false;
     }
     assign_result = false;
-    src = c::print(c::call("mem_fence", {fence_flags(mem_sem_cst->GetU32())}));
+    fb.expression(c::call("mem_fence", {fence_flags(mem_sem_cst->GetU32())}));
     break;
   }
   case spv::Op::OpGroupNonUniformShuffle:
@@ -1007,13 +1000,13 @@ bool translator_impl::translate_instruction(const Instruction &inst,
       return false;
     }
 
-    src = c::print(call_values("wait_group_events", {num_events, event_list}));
+    fb.expression(call_values("wait_group_events", {num_events, event_list}));
     assign_result = false;
     break;
   }
   case spv::Op::OpExtInst: {
     assign_result = false;
-    if (!translate_extended_instruction(inst, src)) {
+    if (!translate_extended_instruction(inst, fb)) {
       return false;
     }
     break;
@@ -1024,10 +1017,20 @@ bool translator_impl::translate_instruction(const Instruction &inst,
   }
 
   if ((result != 0) && assign_result) {
-    src = src_var_decl(result) + " = " + c::print(val);
+    fb.declare(src_var_decl(result), val);
   }
 
   return true;
+}
+
+c::expr_ref translator_impl::materialize(uint32_t id, function_builder &fb) {
+  auto val = value(id);
+  if (val->k == c::expr::kind::name) {
+    return val;
+  }
+  auto tmp = m_name_allocator.allocate(name_of(id) + "_tmp");
+  fb.declare(src_var_decl(type_id_for(id), tmp), val);
+  return c::name(tmp);
 }
 
 c::expr_ref translator_impl::translate_binop(const Instruction &inst) const {

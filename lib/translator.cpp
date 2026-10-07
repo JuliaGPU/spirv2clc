@@ -735,7 +735,6 @@ bool translator_impl::translate_function(Function &func) {
   auto &dinst = func.DefInst();
   auto result = dinst.result_id();
 
-  bool decl = false;
   bool entrypoint = m_entry_points.count(result) != 0;
   auto &os = m_out.functions;
 
@@ -743,37 +742,34 @@ bool translator_impl::translate_function(Function &func) {
     os << "#pragma OPENCL FP_CONTRACT OFF" << std::endl;
   }
 
-  // Check if this is just a declaration
-  if (m_imports.count(result)) {
-    decl = true;
-  }
-
-  // Emit function signature
   emit_function_signature(func, false);
 
-  if (decl) {
+  // Imported functions are only declared.
+  if (m_imports.count(result)) {
     os << ";" << std::endl;
     return true;
-  } else {
-    os << "{" << std::endl;
   }
+
+  function_builder fb;
 
   // Declare variables in the local address space used by each kernel at the
   // beginning of the kernel function. If the kernel's call tree references
   // a Workgroup variable, paste the declaration we have prepared as part of
   // translating global variables.
   if (entrypoint) {
-    std::unordered_set<uint32_t> used_globals_in_local_as;
-    IRContext::ProcessFunction process_fn = [this, &used_globals_in_local_as](Function* func) -> bool {
+    std::set<uint32_t> used_globals_in_local_as;
+    IRContext::ProcessFunction process_fn =
+        [this, &used_globals_in_local_as](Function *func) -> bool {
       for (auto &bb : *func) {
         for (auto &inst : bb) {
-          for (auto& op : inst) {
+          for (auto &op : inst) {
             if (spvIsIdType(op.type)) {
               auto used_inst_id = op.AsId();
               auto defuse = m_ir->get_def_use_mgr();
               auto used_inst = defuse->GetDef(used_inst_id);
               if (used_inst->opcode() == spv::Op::OpVariable) {
-                if (used_inst->GetSingleWordOperand(2) == SpvStorageClassWorkgroup) {
+                if (used_inst->GetSingleWordOperand(2) ==
+                    SpvStorageClassWorkgroup) {
                   used_globals_in_local_as.insert(used_inst_id);
                 }
               }
@@ -788,9 +784,19 @@ bool translator_impl::translate_function(Function &func) {
     m_ir->ProcessCallTreeFromRoots(process_fn, &roots);
 
     for (auto lvarid : used_globals_in_local_as) {
-      os << m_local_variable_decls.at(lvarid) << ";\n";
+      fb.declare_upfront(m_local_variable_decls.at(lvarid));
     }
   }
+
+  // ByVal parameters are passed by value; the body expects a pointer to it.
+  func.ForEachParam([this, &fb](const Instruction *inst) {
+    auto result = inst->result_id();
+    if (m_byval_params.count(result)) {
+      fb.declare_upfront(
+          src_var_decl(result) + " = " +
+          c::print(c::address_of(c::name(derived_name(result, "_value")))));
+    }
+  });
 
   // Lower OpPhi out of SSA in two phases. Each predecessor stages the incoming
   // value in a per-phi temporary before its terminator, and the phi block
@@ -799,48 +805,30 @@ bool translator_impl::translate_function(Function &func) {
   // also happens when the branch leaves through another edge (the loop exit
   // then sees the next iteration's value), and sequential writes break when
   // one phi feeds another of the same block (a swap reads the clobbered value).
+  // Block -> (phi, incoming value) pairs to stage at its end.
+  std::unordered_map<const BasicBlock *,
+                     std::vector<std::pair<uint32_t, uint32_t>>>
+      phi_incoming;
   for (auto &bb : func) {
     for (auto &inst : bb) {
-      auto result = inst.result_id();
       if (inst.opcode() != spv::Op::OpPhi) {
         continue;
       }
-      m_phi_vals[&func].push_back(result);
-
+      auto phi = inst.result_id();
+      fb.declare_upfront(src_var_decl(phi));
+      fb.declare_upfront(
+          src_var_decl(type_id_for(phi), derived_name(phi, "_phi")));
       for (unsigned i = 2; i < inst.NumOperands(); i += 2) {
-        auto var = inst.GetSingleWordOperand(i);
-        auto parent = inst.GetSingleWordOperand(i + 1);
-        auto parentbb = func.FindBlock(parent);
-
-        m_phi_assigns[&*parentbb].push_back(std::make_pair(result, var));
+        auto incoming = inst.GetSingleWordOperand(i);
+        auto parent = func.FindBlock(inst.GetSingleWordOperand(i + 1));
+        phi_incoming[&*parent].emplace_back(phi, incoming);
       }
     }
   }
 
-  // Now translate
   bool error = false;
-
-  // Add helper variables for byval arguments containing a pointer
-  // (for compatibility with existing code)
-  func.ForEachParam([this, &os](const Instruction *inst) {
-    auto result = inst->result_id();
-    if (m_byval_params.count(result)) {
-      os << "  " << src_type(inst->type_id()) << " " << name_of(result)
-         << " = &" << derived_name(result, "_value") << ";\n";
-    }
-  });
-
-  if (m_phi_vals.count(&func)) {
-    for (auto phival : m_phi_vals.at(&func)) {
-      auto phitype = type_id_for(phival);
-      // Separate declarations: `T *a, b` would not make b a pointer.
-      os << "  " << src_type(phitype) << " " << name_of(phival) << ";\n";
-      os << "  " << src_type(phitype) << " " << derived_name(phival, "_phi")
-         << ";\n";
-    }
-  }
   for (auto &bb : func) {
-    os << name_of(bb.id()) + ":;" << std::endl;
+    fb.label(name_of(bb.id()));
     // Translate all instructions except the terminator. The phis lead the
     // block; each commits the value staged by the predecessor we came from.
     for (auto &inst : bb) {
@@ -848,39 +836,30 @@ bool translator_impl::translate_function(Function &func) {
         break;
       }
       if (inst.opcode() == spv::Op::OpPhi) {
-        os << "  " << name_of(inst.result_id()) << " = "
-           << derived_name(inst.result_id(), "_phi") << ";\n";
+        auto phi = inst.result_id();
+        fb.assign(c::name(name_of(phi)), c::name(derived_name(phi, "_phi")));
         continue;
       }
-      std::string isrc;
-      if (!translate_instruction(inst, isrc)) {
+      if (!translate_instruction(inst, fb)) {
         error = true;
-      }
-      if (isrc != "") {
-        os << "  " << isrc << ";\n";
       }
     }
     // Stage the incoming values of the successors' phis. Staging for every
     // successor, not just the one taken, is harmless: a temporary is only read
     // on entry to its phi's block.
-    if (m_phi_assigns.count(&bb)) {
-      for (auto &phival_var : m_phi_assigns.at(&bb)) {
-        os << "  " << derived_name(phival_var.first, "_phi") << " = "
-           << c::print(value(phival_var.second)) << ";\n";
+    auto it = phi_incoming.find(&bb);
+    if (it != phi_incoming.end()) {
+      for (auto &phi_value : it->second) {
+        fb.assign(c::name(derived_name(phi_value.first, "_phi")),
+                  value(phi_value.second));
       }
     }
-
-    // Translate the terminator
-    std::string isrc;
-    if (!translate_instruction(*bb.ctail(), isrc)) {
+    if (!translate_instruction(*bb.ctail(), fb)) {
       error = true;
-    }
-    if (isrc != "") {
-      os << "  " << isrc << ";\n";
     }
   }
 
-  os << "}\n";
+  os << "{" << std::endl << fb.render() << "}\n";
 
   if (m_entry_points_contraction_off.count(result)) {
     os << "#pragma OPENCL FP_CONTRACT ON" << std::endl;

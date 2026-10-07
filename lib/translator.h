@@ -81,6 +81,46 @@ struct output {
   }
 };
 
+// The body of the function being translated. Translation hands it
+// declarations and statements rather than text, and it decides where each goes
+// and how it is spelled.
+class function_builder {
+public:
+  // A declaration for the whole function, placed before the first block so
+  // that it is in scope wherever control enters (e.g. phi variables).
+  void declare_upfront(const std::string &declaration) {
+    m_upfront << "  " << declaration << ";\n";
+  }
+
+  // A declaration at the current point, with an optional initializer.
+  void declare(const std::string &declaration, c::expr_ref init = nullptr) {
+    m_body << "  " << declaration;
+    if (init) {
+      m_body << " = " << c::print(init);
+    }
+    m_body << ";\n";
+  }
+
+  void label(const std::string &name) { m_body << name << ":;\n"; }
+
+  void assign(c::expr_ref lhs, c::expr_ref rhs) {
+    expression(c::binary("=", std::move(lhs), std::move(rhs)));
+  }
+
+  void expression(const c::expr_ref &e) {
+    m_body << "  " << c::print(e) << ";\n";
+  }
+
+  // A statement C expressions can't express: control flow, loops.
+  void statement(const std::string &text) { m_body << "  " << text << ";\n"; }
+
+  std::string render() const { return m_upfront.str() + m_body.str(); }
+
+private:
+  std::ostringstream m_upfront;
+  std::ostringstream m_body;
+};
+
 struct translator_impl {
 
   translator_impl(spv_target_env env, unsigned opencl_c_version);
@@ -323,12 +363,16 @@ private:
   c::expr_ref
   translate_extended_ternary(const spvtools::opt::Instruction &inst) const;
   bool translate_extended_instruction(const spvtools::opt::Instruction &inst,
-                                      std::string &src);
+                                      function_builder &fb);
   c::expr_ref translate_binop(const spvtools::opt::Instruction &inst) const;
   c::expr_ref
   translate_binop_signed(const spvtools::opt::Instruction &inst) const;
   bool translate_instruction(const spvtools::opt::Instruction &inst,
-                             std::string &src);
+                             function_builder &fb);
+
+  // Value `id` as an lvalue: a variable it is copied into first if it is bound
+  // to an expression (e.g. a constant).
+  c::expr_ref materialize(uint32_t id, function_builder &fb);
 
   bool translate_capabilities();
   bool translate_extensions() const;
@@ -384,8 +428,6 @@ private:
     m_nowrite_params.clear();
     m_byval_params.clear();
     m_alignments.clear();
-    m_phi_vals.clear();
-    m_phi_assigns.clear();
     m_sampled_images.clear();
     m_local_variable_decls.clear();
     m_constant_string_literals.clear();
@@ -440,12 +482,6 @@ private:
   std::unordered_set<uint32_t> m_nowrite_params;
   std::unordered_set<uint32_t> m_byval_params;
   std::unordered_map<uint32_t, uint32_t> m_alignments;
-  std::unordered_map<spvtools::opt::Function *, std::vector<uint32_t>>
-      m_phi_vals;
-  // phival, val pairs
-  std::unordered_map<spvtools::opt::BasicBlock *,
-                     std::vector<std::pair<uint32_t, uint32_t>>>
-      m_phi_assigns;
   std::unordered_map<uint32_t, std::pair<uint32_t, uint32_t>> m_sampled_images;
   std::unordered_map<uint32_t, std::string> m_local_variable_decls;
   std::unordered_map<uint32_t, std::string>

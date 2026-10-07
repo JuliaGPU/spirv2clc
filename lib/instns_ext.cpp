@@ -187,7 +187,7 @@ translator_impl::translate_extended_unary(const Instruction &inst) const {
 }
 
 bool translator_impl::translate_extended_instruction(const Instruction &inst,
-                                                     std::string &src) {
+                                                     function_builder &fb) {
   auto result = inst.result_id();
   auto instruction =
       static_cast<OpenCLLIB::Entrypoints>(inst.GetSingleWordOperand(3));
@@ -329,9 +329,9 @@ bool translator_impl::translate_extended_instruction(const Instruction &inst,
   }
 
   if (stmt) {
-    src = c::print(stmt);
+    fb.expression(stmt);
   } else if (result != 0) {
-    src = src_var_decl(result) + " = " + c::print(val);
+    fb.declare(src_var_decl(result), val);
   }
 
   return true;

@@ -40,7 +40,8 @@
                OpCopyMemorySized %copy %var %sz
                OpReturn
                OpFunctionEnd
-; CHECK: uint s_storage_1; {{.*}} s = &s_storage_1;
+; CHECK: uint s_storage_1;
+; CHECK-NEXT: {{.*}} s = &s_storage_1;
 ; CHECK: uint x = v{{[0-9]+}} + (uint)1;
 ; CHECK-NEXT: uint x_1 = x + (uint)1;
 ; CHECK-NEXT: uint v9 = x_1 + (uint)1;
