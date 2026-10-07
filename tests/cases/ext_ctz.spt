@@ -1,0 +1,40 @@
+; OpenCL.std ctz is an OpenCL C 2.0 builtin. For older versions it is computed with
+; popcount, which must count the bit width for 0, also for 8-bit operands that
+; OpenCL C promotes to int.
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL1.2 %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL3.0 %s | %clang -c -cl-std=CL3.0 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL1.2 %s | %FileCheck %s --check-prefix=CL12
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL3.0 %s | %FileCheck %s --check-prefix=CL30
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Int8
+               OpCapability Int64
+          %1 = OpExtInstImport "OpenCL.std"
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+       %void = OpTypeVoid
+      %uchar = OpTypeInt 8 0
+       %uint = OpTypeInt 32 0
+      %ulong = OpTypeInt 64 0
+     %p_gc = OpTypePointer CrossWorkgroup %uchar
+     %p_gl = OpTypePointer CrossWorkgroup %ulong
+       %fnty = OpTypeFunction %void %p_gc %p_gl %uint
+          %k = OpFunction %void None %fnty
+         %pc = OpFunctionParameter %p_gc
+         %pl = OpFunctionParameter %p_gl
+          %x = OpFunctionParameter %uint
+        %lbl = OpLabel
+         %c = OpLoad %uchar %pc
+         %l = OpLoad %ulong %pl
+        %tc = OpExtInst %uchar %1 ctz %c
+        %tx = OpExtInst %uint %1 ctz %x
+        %tl = OpExtInst %ulong %1 ctz %l
+               OpStore %pc %tc
+               OpStore %pl %tl
+               OpReturn
+               OpFunctionEnd
+; CL12: uchar {{v[0-9]+}} = popcount(((uchar)(([[C:v[0-9]+]] & -[[C]]) - 1)));
+; CL12: uint {{v[0-9]+}} = popcount(((uint)(([[X:v[0-9]+]] & -[[X]]) - 1)));
+; CL12: ulong {{v[0-9]+}} = popcount(((ulong)(([[L:v[0-9]+]] & -[[L]]) - 1)));
+; CL30: uchar {{v[0-9]+}} = ctz({{v[0-9]+}});
+; CL30: ulong {{v[0-9]+}} = ctz({{v[0-9]+}});
