@@ -21,4 +21,4 @@
                OpStore %glob %inc
                OpReturn
                OpFunctionEnd
-; CHECK: global uint {{[A-Za-z0-9_]+}}_storage = ((uint)7)
+; CHECK: global uint {{[A-Za-z0-9_]+}}_storage = (uint)7

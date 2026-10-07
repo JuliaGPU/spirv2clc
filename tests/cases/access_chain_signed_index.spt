@@ -25,4 +25,4 @@
         %nxt = OpPtrAccessChain %puchar %param %ulong_minus1
                OpReturn
                OpFunctionEnd
-; CHECK: = (({{ma[0-9]+}} global*)((ulong)[[BASE:v[0-9]+]] + (ulong)((long)({{.*}})) * sizeof(*[[BASE]])));
+; CHECK: = ({{ma[0-9]+}} global*)((ulong)[[BASE:v[0-9]+]] + (ulong)(long){{.*}} * sizeof(*[[BASE]]));

@@ -1,0 +1,25 @@
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+; Negating a negative constant: the operand is spliced into a larger expression
+; and must not fuse with the operator into a decrement (`--1.5f`).
+               OpCapability Addresses
+               OpCapability Kernel
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k"
+       %void = OpTypeVoid
+      %float = OpTypeFloat 32
+        %ptr = OpTypePointer CrossWorkgroup %float
+         %fn = OpTypeFunction %void %ptr
+     %neg1_5 = OpConstant %float -1.5
+    %neg_inf = OpConstant %float -0x1p+128
+          %k = OpFunction %void None %fn
+        %out = OpFunctionParameter %ptr
+      %entry = OpLabel
+          %a = OpFNegate %float %neg1_5
+          %b = OpFNegate %float %neg_inf
+          %c = OpFAdd %float %a %b
+               OpStore %out %c
+               OpReturn
+               OpFunctionEnd
+; CHECK: = -(-1.5{{0*}}f);
+; CHECK: = -(-INFINITY);

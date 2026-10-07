@@ -31,4 +31,4 @@
 ; CHECK-NEXT: ulong m0;
 ; ... and reconstructed on load.
 ; CHECK: typedef [[E]] global* __attribute__((may_alias)) [[P:ma[0-9]+]];
-; CHECK: = ([[P]] private*)(
+; CHECK: = ([[P]] private*)&

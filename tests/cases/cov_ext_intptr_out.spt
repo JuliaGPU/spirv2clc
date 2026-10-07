@@ -28,6 +28,6 @@
                OpReturn
                OpFunctionEnd
 ; CHECK: typedef int __attribute__((may_alias)) [[I:ma[0-9]+s]];
-; CHECK-DAG: = frexp({{v[0-9]+}}, (([[I]] global*){{v[0-9]+}}));
-; CHECK-DAG: = lgamma_r({{v[0-9]+}}, (([[I]] global*){{v[0-9]+}}));
-; CHECK-DAG: = remquo({{v[0-9]+}}, {{v[0-9]+}}, (([[I]] global*){{v[0-9]+}}));
+; CHECK-DAG: = frexp({{v[0-9]+}}, ([[I]] global*){{v[0-9]+}});
+; CHECK-DAG: = lgamma_r({{v[0-9]+}}, ([[I]] global*){{v[0-9]+}});
+; CHECK-DAG: = remquo({{v[0-9]+}}, {{v[0-9]+}}, ([[I]] global*){{v[0-9]+}});

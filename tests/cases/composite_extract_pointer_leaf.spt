@@ -26,5 +26,5 @@
                OpStore %p %uint_0
                OpReturn
                OpFunctionEnd
-; CHECK: .m1.m1 = (ulong)(
-; CHECK: global* {{v[0-9]+}} = ((ma{{[0-9]+}} global*){{v[0-9]+}}.m1.m1);
+; CHECK: .m1.m1 = (ulong){{v[0-9]+}};
+; CHECK: global* {{v[0-9]+}} = (ma{{[0-9]+}} global*){{v[0-9]+}}.m1.m1;

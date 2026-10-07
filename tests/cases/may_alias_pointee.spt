@@ -46,5 +46,5 @@
 ; The float stores land in storage addressed as [[F]] ...
 ; CHECK: [[F]] private*
 ; ... and the bitcast pointer and the load through it use [[U]]:
-; CHECK: [[U]] private* [[P:v[0-9]+]] = (([[U]] private*)
+; CHECK: [[U]] private* [[P:v[0-9]+]] = ([[U]] private*)
 ; CHECK: = *[[P]];

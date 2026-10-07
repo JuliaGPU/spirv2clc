@@ -26,6 +26,6 @@
                OpReturn
                OpFunctionEnd
 ; CHECK: typedef uint __attribute__((may_alias)) [[MA:ma[0-9]+]];
-; CHECK: (([[MA]] generic*)
-; CHECK: (([[MA]] global*)
+; CHECK: ([[MA]] generic*)
+; CHECK: ([[MA]] global*)
 ; CHECK: ==

@@ -31,12 +31,12 @@
 ; CHECK: typedef uint __attribute__((may_alias)) [[U:ma[0-9]+]];
 ; CHECK: typedef [[U]] __attribute__((aligned(2))) [[UA:ma[0-9]+a2]];
 ; Volatile load and store go through a volatile-qualified pointer:
-; CHECK: = *((volatile [[U]] global*)[[IN:v[0-9]+]]);
-; CHECK: *((volatile [[U]] global*)[[IN]]) = ((uint)1);
+; CHECK: = *(volatile [[U]] global*)[[IN:v[0-9]+]];
+; CHECK: *(volatile [[U]] global*)[[IN]] = (uint)1;
 ; Volatile combines with under-alignment:
-; CHECK: = *((volatile [[UA]] global*)[[IN]]);
+; CHECK: = *(volatile [[UA]] global*)[[IN]];
 ; A single memory operand on OpCopyMemory applies to both sides:
-; CHECK: *((volatile [[U]] private*){{v[0-9]+}}) = *((volatile [[U]] global*)([[IN]]));
+; CHECK: *(volatile [[U]] private*){{v[0-9]+}} = *(volatile [[U]] global*)[[IN]];
 ; Unflagged accesses stay plain dereferences:
 ; CHECK: [[V3:v[0-9]+]] = *[[IN]];
 ; CHECK: *[[IN]] = [[V3]];

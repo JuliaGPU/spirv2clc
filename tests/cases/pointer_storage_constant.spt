@@ -1,0 +1,30 @@
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+; A pointer member of a constant struct is stored as an integer like any other
+; pointer in an aggregate, so the constant converts it to that form.
+               OpCapability Addresses
+               OpCapability Kernel
+               OpCapability Int64
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+        %ptr = OpTypePointer CrossWorkgroup %uint
+          %s = OpTypeStruct %ptr %uint
+       %sptr = OpTypePointer Function %s
+         %fn = OpTypeFunction %void %ptr
+     %uint_1 = OpConstant %uint 1
+       %null = OpConstantNull %ptr
+         %cs = OpConstantComposite %s %null %uint_1
+          %k = OpFunction %void None %fn
+        %out = OpFunctionParameter %ptr
+      %entry = OpLabel
+        %var = OpVariable %sptr Function %cs
+         %ld = OpLoad %s %var
+         %p0 = OpCompositeExtract %ptr %ld 0
+               OpStore %out %uint_1
+               OpReturn
+               OpFunctionEnd
+; CHECK: struct [[S:v[0-9]+]] {
+; CHECK-NEXT: ulong m0;
+; CHECK: (struct [[S]]){(ulong)(ma{{[0-9]+}} global*)0, (uint)1}

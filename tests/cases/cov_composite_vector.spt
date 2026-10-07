@@ -36,9 +36,9 @@
                OpStore %out %sh
                OpReturn
                OpFunctionEnd
-; CHECK: = {((uint)0), ((uint)1), ((uint)2), ((uint)3)};
+; CHECK: = {(uint)0, (uint)1, (uint)2, (uint)3};
 ; CHECK: = {{.*}}.s0;
 ; CHECK: = ((uint*)&{{.*}})[{{.*}}];
 ; CHECK: {{.*}}.s1 = {{.*}};
-; CHECK: ((uint*)&{{.*}})[((uint)2)] = {{.*}};
-; CHECK: = (({{u?int4}})({{.*}}.s0, {{.*}}.s1, {{.*}}.s2, {{.*}}.s3));
+; CHECK: ((uint*)&{{.*}})[(uint)2] = {{.*}};
+; CHECK: = ({{u?int4}})({{.*}}.s0, {{.*}}.s1, {{.*}}.s2, {{.*}}.s3);

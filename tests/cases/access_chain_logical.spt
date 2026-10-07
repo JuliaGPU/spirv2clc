@@ -23,5 +23,4 @@
         %elt = OpAccessChain %puint %param %uint_0 %uint_2
                OpReturn
                OpFunctionEnd
-; CHECK: ->m0
-; CHECK-SAME: ->e[
+; CHECK: = &{{v[0-9]+}}->m0.e[

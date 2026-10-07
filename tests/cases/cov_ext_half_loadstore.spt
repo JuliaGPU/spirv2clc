@@ -38,11 +38,11 @@
        %vsar = OpExtInst %void %ext vstorea_halfn_r %sumv %off %hptr RTZ
                OpReturn
                OpFunctionEnd
-; CHECK: = vload_half(((ulong)0), {{v[0-9]+}});
-; CHECK: = vload_half4(((ulong)0), {{v[0-9]+}});
-; CHECK: = vloada_half4(((ulong)0), {{v[0-9]+}});
-; CHECK: vstore_half({{v[0-9]+}}, ((ulong)0), {{v[0-9]+}});
-; CHECK: vstore_half_rte({{v[0-9]+}}, ((ulong)0), {{v[0-9]+}});
-; CHECK: vstore_half4({{v[0-9]+}}, ((ulong)0), {{v[0-9]+}});
-; CHECK: vstorea_half4({{v[0-9]+}}, ((ulong)0), {{v[0-9]+}});
-; CHECK: vstorea_half4_rtz({{v[0-9]+}}, ((ulong)0), {{v[0-9]+}});
+; CHECK: = vload_half((ulong)0, {{v[0-9]+}});
+; CHECK: = vload_half4((ulong)0, {{v[0-9]+}});
+; CHECK: = vloada_half4((ulong)0, {{v[0-9]+}});
+; CHECK: vstore_half({{v[0-9]+}}, (ulong)0, {{v[0-9]+}});
+; CHECK: vstore_half_rte({{v[0-9]+}}, (ulong)0, {{v[0-9]+}});
+; CHECK: vstore_half4({{v[0-9]+}}, (ulong)0, {{v[0-9]+}});
+; CHECK: vstorea_half4({{v[0-9]+}}, (ulong)0, {{v[0-9]+}});
+; CHECK: vstorea_half4_rtz({{v[0-9]+}}, (ulong)0, {{v[0-9]+}});

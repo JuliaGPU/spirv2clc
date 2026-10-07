@@ -1,0 +1,26 @@
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+; A dynamic extract indexes the vector through its address, so a constant
+; vector, which is a literal and has none, is copied into a variable first.
+               OpCapability Addresses
+               OpCapability Kernel
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+     %v4uint = OpTypeVector %uint 4
+        %ptr = OpTypePointer CrossWorkgroup %uint
+         %fn = OpTypeFunction %void %ptr %uint
+     %uint_1 = OpConstant %uint 1
+     %uint_2 = OpConstant %uint 2
+        %vec = OpConstantComposite %v4uint %uint_1 %uint_2 %uint_1 %uint_2
+          %k = OpFunction %void None %fn
+        %out = OpFunctionParameter %ptr
+          %i = OpFunctionParameter %uint
+      %entry = OpLabel
+          %e = OpVectorExtractDynamic %uint %vec %i
+               OpStore %out %e
+               OpReturn
+               OpFunctionEnd
+; CHECK: uint4 [[TMP:v[0-9]+_tmp]] = (uint4)((uint)1, (uint)2, (uint)1, (uint)2);
+; CHECK-NEXT: = ((uint*)&[[TMP]])[{{v[0-9]+}}];

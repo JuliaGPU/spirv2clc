@@ -41,9 +41,10 @@
 ; CHECK: entry:
 ; CHECK: switch (sel){default: goto def;case 0: goto caseA;case 1: goto caseB;}
 ; CHECK: caseA:
-; CHECK: res = ((uint)10);
+; CHECK: res_phi = (uint)10;
 ; CHECK: caseB:
-; CHECK: res = ((uint)20);
+; CHECK: res_phi = (uint)20;
 ; CHECK: def:
-; CHECK: res = ((uint)30);
+; CHECK: res_phi = (uint)30;
 ; CHECK: merge:
+; CHECK-NEXT: res = res_phi;

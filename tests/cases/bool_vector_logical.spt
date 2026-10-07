@@ -1,8 +1,8 @@
-; A vector of OpTypeBool has no OpenCL C type ("boolN" is invalid). When such a
-; constant is an operand to a logical op, it must be re-spelled as a signed-int
-; vector at the width of the other operand. The same bool-vector constant
-; (%alltrue) is used in both a float4 (-> int4) and a double4 (-> long4) context,
-; so its spelling must follow the consumer.
+; A vector of OpTypeBool has no OpenCL C type ("boolN" is invalid); it is an
+; int4 mask with true as -1, so a bool-vector constant is spelled as one in both
+; a float4 and a double4 context. A double4 comparison yields a long4 mask,
+; narrowed to the canonical int4, and a select of ulong4 values widens the mask
+; back to the width of the selected elements.
 ; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL3.0 %s | %FileCheck %s
 ; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL3.0 %s | %clang -c -cl-std=CL3.0 -x cl - -o /dev/null
                OpCapability Kernel
@@ -60,6 +60,9 @@
                OpReturn
                OpFunctionEnd
 ; CHECK-NOT: bool4
-; CHECK: ((int4)(true, true, true, true))
-; CHECK: ((int4)(0))
-; CHECK: ((long4)(true, true, true, true))
+; CHECK: int4 [[CMP:v[0-9]+]] = {{.*}} != (float4)(0);
+; CHECK: [[CMP]] && (int4)(-1, -1, -1, -1)
+; CHECK: || (int4)(0)
+; CHECK: int4 [[CMPD:v[0-9]+]] = convert_int4({{.*}} != (double4)(0));
+; CHECK: int4 [[ANDD:v[0-9]+]] = [[CMPD]] && (int4)(-1, -1, -1, -1);
+; CHECK: convert_long4([[ANDD]]) ?

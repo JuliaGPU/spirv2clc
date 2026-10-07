@@ -33,7 +33,7 @@
                OpReturn
                OpFunctionEnd
 ; CHECK: [[GU:ma[0-9]+]] global* [[PU:v[0-9]+]], [[GL:ma[0-9]+]] global* [[PL:v[0-9]+]], [[LU:ma[0-9]+]] local* [[PLU:v[0-9]+]]
-; CHECK: uint {{v[0-9]+}} = as_uint(atomic_min((([[GU]]s global*)[[PU]]), as_int(((uint)4294967295))));
-; CHECK: ulong {{v[0-9]+}} = as_ulong(atom_max((([[GL]]s global*)[[PL]]), as_long(((ulong)18446744073709551615))));
-; CHECK: uint {{v[0-9]+}} = as_uint(atomic_max((([[LU]]s local*)[[PLU]]), as_int(((uint)4294967295))));
-; CHECK: uint {{v[0-9]+}} = atomic_min([[PU]], ((uint)4294967295));
+; CHECK: uint {{v[0-9]+}} = as_uint(atomic_min(([[GU]]s global*)[[PU]], as_int((uint)4294967295)));
+; CHECK: ulong {{v[0-9]+}} = as_ulong(atom_max(([[GL]]s global*)[[PL]], as_long((ulong)18446744073709551615)));
+; CHECK: uint {{v[0-9]+}} = as_uint(atomic_max(([[LU]]s local*)[[PLU]], as_int((uint)4294967295)));
+; CHECK: uint {{v[0-9]+}} = atomic_min([[PU]], (uint)4294967295);

@@ -1,6 +1,6 @@
 ; A program-scope global with an exported linkage name must still be referenced
-; through its &storage alias, not the bare linkage identifier (which is never
-; declared). Regression: the linkage name used to shadow the alias in var_for.
+; through its storage, not the bare linkage identifier (which is never
+; declared). Regression: the linkage name used to shadow the storage.
 ; RUN: %spirv2clc --asm --cl-std=CL2.0 %s | %FileCheck %s
 ; RUN: %spirv2clc --asm --cl-std=CL2.0 %s | %clang -c -cl-std=CL2.0 -x cl - -o /dev/null
                OpCapability Kernel
@@ -22,5 +22,5 @@
                OpStore %g %inc
                OpReturn
                OpFunctionEnd
-; CHECK: global uint g_storage = ((uint)7);
-; CHECK: *(&g_storage)
+; CHECK: global uint g_storage = (uint)7;
+; CHECK: = g_storage;

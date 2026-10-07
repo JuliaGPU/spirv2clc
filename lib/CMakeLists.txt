@@ -26,6 +26,9 @@ set(SPIRV2CLC_UNITY_SOURCES
 
 add_library(libspirv2clc
   translator.cpp
+  translator.h
+  cexpr.cpp
+  cexpr.h
   ${SPIRV2CLC_UNITY_SOURCES}
   "${PROJECT_SOURCE_DIR}/include/spirv2clc.h")
 add_library(spirv2clc::libspirv2clc ALIAS libspirv2clc)

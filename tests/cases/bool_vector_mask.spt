@@ -1,0 +1,81 @@
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+; Bool vectors are int masks with true as -1 wherever they flow: through a phi,
+; a constant used as a select condition (which tests the sign bit, so true must
+; not be 1), a comparison against such a constant, any(), and component-wise
+; extract, insert and construct, where scalar bools convert to and from mask
+; elements. With n = 2 the stored vectors are (1,1,0,0), (1,1,1,1), (1,1,1,1),
+; (1,0,0,0) and (0,1,0,0).
+               OpCapability Addresses
+               OpCapability Kernel
+               OpCapability Int64
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k"
+               OpName %lt "lt"
+               OpName %m "m"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+      %ulong = OpTypeInt 64 0
+       %bool = OpTypeBool
+     %v4uint = OpTypeVector %uint 4
+    %v4ulong = OpTypeVector %ulong 4
+     %v4bool = OpTypeVector %bool 4
+        %ptr = OpTypePointer CrossWorkgroup %v4uint
+         %fn = OpTypeFunction %void %ptr %uint
+     %uint_0 = OpConstant %uint 0
+     %uint_1 = OpConstant %uint 1
+     %uint_2 = OpConstant %uint 2
+     %uint_3 = OpConstant %uint 3
+     %uint_4 = OpConstant %uint 4
+    %ulong_0 = OpConstant %ulong 0
+    %ulong_1 = OpConstant %ulong 1
+    %ulong_2 = OpConstant %ulong 2
+    %ulong_3 = OpConstant %ulong 3
+      %lanes = OpConstantComposite %v4ulong %ulong_0 %ulong_1 %ulong_2 %ulong_3
+       %true = OpConstantTrue %bool
+      %false = OpConstantFalse %bool
+    %alltrue = OpConstantComposite %v4bool %true %true %true %true
+       %ones = OpConstantComposite %v4uint %uint_1 %uint_1 %uint_1 %uint_1
+      %zeros = OpConstantNull %v4uint
+          %k = OpFunction %void None %fn
+        %out = OpFunctionParameter %ptr
+          %n = OpFunctionParameter %uint
+      %entry = OpLabel
+        %n64 = OpUConvert %ulong %n
+      %splat = OpCompositeConstruct %v4ulong %n64 %n64 %n64 %n64
+         %lt = OpULessThan %v4bool %lanes %splat
+               OpBranch %next
+       %next = OpLabel
+          %m = OpPhi %v4bool %lt %entry
+         %eq = OpLogicalEqual %v4bool %m %alltrue
+       %sel1 = OpSelect %v4uint %eq %ones %zeros
+               OpStore %out %sel1
+       %sel2 = OpSelect %v4uint %alltrue %ones %zeros
+         %o1 = OpInBoundsPtrAccessChain %ptr %out %uint_1
+               OpStore %o1 %sel2
+        %any = OpAny %bool %m
+        %ext = OpCompositeExtract %bool %m 1
+       %both = OpLogicalAnd %bool %any %ext
+      %bothv = OpCompositeConstruct %v4bool %both %both %both %both
+       %sel3 = OpSelect %v4uint %bothv %ones %zeros
+         %o2 = OpInBoundsPtrAccessChain %ptr %out %uint_2
+               OpStore %o2 %sel3
+        %ins = OpCompositeInsert %v4bool %false %m 1
+       %sel4 = OpSelect %v4uint %ins %ones %zeros
+         %o3 = OpInBoundsPtrAccessChain %ptr %out %uint_3
+               OpStore %o3 %sel4
+       %cons = OpCompositeConstruct %v4bool %false %ext %false %false
+       %sel5 = OpSelect %v4uint %cons %ones %zeros
+         %o4 = OpInBoundsPtrAccessChain %ptr %out %uint_4
+               OpStore %o4 %sel5
+               OpReturn
+               OpFunctionEnd
+; CHECK-NOT: bool4
+; CHECK: int4 m;
+; CHECK-NEXT: int4 m_phi;
+; CHECK: int4 lt = convert_int4(
+; CHECK: m == (int4)(-1, -1, -1, -1);
+; CHECK: = (int4)(-1, -1, -1, -1) ?
+; CHECK: bool [[EXT:v[0-9]+]] = m.s1;
+; CHECK: = {-(int)[[BOTH:v[0-9]+]], -(int)[[BOTH]],
+; CHECK: .s1 = -(int)false;

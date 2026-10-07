@@ -23,5 +23,5 @@
          %st = OpExtInst %void %ext vstoren %v %off %dst
                OpReturn
                OpFunctionEnd
-; CHECK: = vload4(((ulong)0), {{v[0-9]+}});
-; CHECK: vstore4({{v[0-9]+}}, ((ulong)0), {{v[0-9]+}});
+; CHECK: = vload4((ulong)0, {{v[0-9]+}});
+; CHECK: vstore4({{v[0-9]+}}, (ulong)0, {{v[0-9]+}});

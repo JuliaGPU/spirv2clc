@@ -1,37 +1,79 @@
-std::string translator::src_aggregate_element_type(uint32_t tyid) const {
-  // OpenCL forbids pointers inside structs/arrays, so encode every pointer leaf
-  // as a same-width integer (ulong under Physical64). Access chains reconstruct
-  // the real pointer type on the way in (see emit_access_chain). Non-pointer
-  // members keep their normal flat type name (arrays are struct-wrapped).
+c::expr_ref translator_impl::to_component(uint32_t composite_tyid,
+                                          uint32_t elem_tyid,
+                                          c::expr_ref value) const {
+  auto composite = type_for(composite_tyid)->kind();
+  if (composite == Type::Kind::kVector &&
+      type_for(elem_tyid)->kind() == Type::Kind::kBool) {
+    return c::unary("-", c::cast("int", std::move(value)));
+  }
+  if (composite == Type::Kind::kStruct || composite == Type::Kind::kArray) {
+    return to_storage(elem_tyid, std::move(value));
+  }
+  return value;
+}
+
+c::expr_ref translator_impl::from_component(uint32_t composite_tyid,
+                                            uint32_t elem_tyid,
+                                            c::expr_ref component) const {
+  // A mask element (-1 or 0) needs no conversion: it is only ever used to
+  // initialize a bool, which normalizes it.
+  auto composite = type_for(composite_tyid)->kind();
+  if (composite == Type::Kind::kStruct || composite == Type::Kind::kArray) {
+    return from_storage(elem_tyid, std::move(component));
+  }
+  return component;
+}
+
+std::string translator_impl::src_storage_type(uint32_t tyid) const {
   if (type_for(tyid)->kind() == Type::Kind::kPointer) {
-    return "ulong";
+    return src_pointer_int_type();
   }
   return src_type(tyid);
 }
 
-bool translator::src_composite_path(const spvtools::opt::Instruction &inst,
-                                    unsigned first, uint32_t tyid,
-                                    std::string &path,
-                                    uint32_t &leaf_tyid) const {
-  path.clear();
+c::expr_ref translator_impl::to_storage(uint32_t tyid,
+                                        c::expr_ref value) const {
+  if (type_for(tyid)->kind() == Type::Kind::kPointer) {
+    return c::cast(src_storage_type(tyid), std::move(value));
+  }
+  return value;
+}
+
+c::expr_ref translator_impl::from_storage(uint32_t tyid,
+                                          c::expr_ref stored) const {
+  if (type_for(tyid)->kind() == Type::Kind::kPointer) {
+    return cast_to(tyid, std::move(stored));
+  }
+  return stored;
+}
+
+bool translator_impl::composite_member(const spvtools::opt::Instruction &inst,
+                                       unsigned first, uint32_t tyid,
+                                       c::expr_ref base, c::expr_ref &member,
+                                       uint32_t &leaf_tyid,
+                                       uint32_t &parent_tyid) const {
+  member = std::move(base);
+  parent_tyid = 0;
   for (unsigned i = first; i < inst.NumOperands(); i++) {
+    parent_tyid = tyid;
     auto idx = inst.GetSingleWordOperand(i);
     auto type = type_for(tyid);
     switch (type->kind()) {
     case Type::Kind::kVector: {
       std::stringstream scomp;
       scomp << std::hex << idx;
-      path += ".s" + scomp.str();
+      member = c::member(member, "s" + scomp.str());
       tyid = type_id_for(type->AsVector()->element_type());
       break;
     }
     case Type::Kind::kArray:
       // Arrays are struct-wrapped; index through the 'e' member.
-      path += ".e[" + std::to_string(idx) + "]";
+      member =
+          c::index(c::member(member, "e"), c::literal(std::to_string(idx)));
       tyid = type_id_for(type->AsArray()->element_type());
       break;
     case Type::Kind::kStruct:
-      path += ".m" + std::to_string(idx);
+      member = c::member(member, "m" + std::to_string(idx));
       tyid = type_id_for(type->AsStruct()->element_types()[idx]);
       break;
     default:
@@ -44,15 +86,7 @@ bool translator::src_composite_path(const spvtools::opt::Instruction &inst,
   return true;
 }
 
-std::string translator::src_aggregate_element_value(uint32_t tyid,
-                                                    uint32_t object) const {
-  if (type_for(tyid)->kind() == Type::Kind::kPointer) {
-    return "(" + src_aggregate_element_type(tyid) + ")(" + var_for(object) + ")";
-  }
-  return var_for(object);
-}
-
-std::string translator::address_space_qualifier(uint32_t storage) const {
+std::string translator_impl::address_space_qualifier(uint32_t storage) const {
   switch (storage) {
   case SpvStorageClassCrossWorkgroup:
     return "global";
@@ -81,7 +115,7 @@ std::string translator::address_space_qualifier(uint32_t storage) const {
   }
 }
 
-void translator::declare_pointee_alias(uint32_t tyid) {
+void translator_impl::declare_pointee_alias(uint32_t tyid) {
   // SPIR-V memory is untyped: OpBitcast freely reinterprets pointers and the
   // resulting loads/stores are well-defined, so the emitted C must not be
   // subject to type-based alias analysis (e.g. a `*(ulong*)` load of float
@@ -97,7 +131,8 @@ void translator::declare_pointee_alias(uint32_t tyid) {
   // Called for the pointee of every OpTypePointer as it is translated, so all
   // typedefs land in the type section (after the pointee's own definition)
   // and every later spelling of a pointer type is a pure lookup.
-  if (m_pointee_aliases.count(tyid)) {
+  auto &info = m_type_info[tyid];
+  if (!info.alias.empty()) {
     return;
   }
   switch (type_for(tyid)->kind()) {
@@ -112,23 +147,25 @@ void translator::declare_pointee_alias(uint32_t tyid) {
   default:
     // Not dereferenceable through reinterpreted pointers (void, images,
     // samplers, events, opaque structs); keep the raw spelling.
-    m_pointee_aliases[tyid] = src_type(tyid);
+    info.alias = src_type(tyid);
     return;
   }
-  std::string name = "ma" + std::to_string(tyid);
-  m_src << "typedef " << src_type(tyid) << " __attribute__((may_alias)) "
-        << name << ";" << std::endl;
-  m_pointee_aliases[tyid] = name;
-  if (m_types_signed.count(tyid)) {
-    m_src << "typedef " << src_type_signed(tyid)
-          << " __attribute__((may_alias)) " << name << "s;" << std::endl;
-    m_pointee_aliases_signed[tyid] = name + "s";
+  auto name = m_name_allocator.allocate("ma" + std::to_string(tyid));
+  m_out.types << "typedef " << src_type(tyid) << " __attribute__((may_alias)) "
+              << name << ";" << std::endl;
+  info.alias = name;
+  if (has_signed_type(tyid)) {
+    auto signed_name = m_name_allocator.allocate(name + "s");
+    m_out.types << "typedef " << src_type_signed(tyid)
+                << " __attribute__((may_alias)) " << signed_name << ";"
+                << std::endl;
+    info.signed_alias = signed_name;
   }
 }
 
-translator::MemoryAccess
-translator::memory_access_operands(const Instruction &inst,
-                                   unsigned index) const {
+translator_impl::MemoryAccess
+translator_impl::memory_access_operands(const Instruction &inst,
+                                        unsigned index) const {
   MemoryAccess access;
   access.next = index;
   if (inst.NumOperands() <= index) {
@@ -145,12 +182,12 @@ translator::memory_access_operands(const Instruction &inst,
   return access;
 }
 
-uint32_t translator::pointee_type_id(uint32_t val) const {
+uint32_t translator_impl::pointee_type_id(uint32_t val) const {
   auto pointee = type_for_val(val)->AsPointer()->pointee_type();
   return m_ir->get_type_mgr()->GetId(pointee);
 }
 
-uint32_t translator::natural_alignment(uint32_t tyid) const {
+uint32_t translator_impl::natural_alignment(uint32_t tyid) const {
   auto tymgr = m_ir->get_type_mgr();
   const Type *ty = type_for(tyid);
   switch (ty->kind()) {
@@ -181,7 +218,7 @@ uint32_t translator::natural_alignment(uint32_t tyid) const {
     return align;
   }
   case Type::Kind::kPointer:
-    return 8; // pointers are 8 bytes wide under Physical64 (assumed throughout)
+    return m_pointer_width / 8;
   default:
     // bool, images, samplers, ...: never accessed through reinterpreted
     // pointers, and 1 can never be under-aligned.
@@ -189,13 +226,14 @@ uint32_t translator::natural_alignment(uint32_t tyid) const {
   }
 }
 
-bool translator::is_underaligned(uint32_t tyid,
-                                 const MemoryAccess &access) const {
+bool translator_impl::is_underaligned(uint32_t tyid,
+                                      const MemoryAccess &access) const {
   return (access.mask & SpvMemoryAccessAlignedMask) && access.alignment != 0 &&
          access.alignment < natural_alignment(tyid);
 }
 
-void translator::declare_underaligned_aliases() {
+std::string translator_impl::underaligned_alias(uint32_t tyid,
+                                                uint32_t alignment) {
   // A C dereference asserts the pointee's natural alignment, but a SPIR-V
   // access can promise less (an Aligned memory operand below the type's
   // natural alignment -- e.g. an i64 load of a 4-aligned pair of floats
@@ -204,73 +242,47 @@ void translator::declare_underaligned_aliases() {
   // accesses are dereferenced through a reduced-alignment typedef instead --
   // only a typedef can lower alignment in C -- built on top of the pointee's
   // may_alias alias so both properties hold at once.
-  auto mint = [this](const Instruction &inst, uint32_t tyid,
-                     unsigned index) -> MemoryAccess {
-    auto access = memory_access_operands(inst, index);
-    if (!is_underaligned(tyid, access)) {
-      return access;
-    }
-    auto key = std::make_pair(tyid, access.alignment);
-    if (m_underaligned_aliases.count(key)) {
-      return access;
-    }
-    // Every pointee reached by a load/store has an OpTypePointer, so its
-    // may_alias alias exists (and is a real typedef: non-dereferenceable
-    // kinds are filtered out by their natural alignment of 1 above).
-    auto base = m_pointee_aliases.at(tyid);
-    auto name = base + "a" + std::to_string(access.alignment);
-    m_src << "typedef " << base << " __attribute__((aligned("
-          << access.alignment << "))) " << name << ";" << std::endl;
-    m_underaligned_aliases.emplace(key, name);
-    return access;
-  };
-  for (auto &func : *m_ir->module()) {
-    for (auto &bb : func) {
-      for (auto &inst : bb) {
-        switch (inst.opcode()) {
-        case spv::Op::OpLoad:
-          mint(inst, pointee_type_id(inst.GetSingleWordOperand(2)), 3);
-          break;
-        case spv::Op::OpStore:
-          mint(inst, pointee_type_id(inst.GetSingleWordOperand(0)), 2);
-          break;
-        case spv::Op::OpCopyMemory: {
-          // The first memory operand applies to the target, a second (SPIR-V
-          // 1.4+), if present, to the source; both sides share a pointee.
-          auto tyid = pointee_type_id(inst.GetSingleWordOperand(0));
-          auto access = mint(inst, tyid, 2);
-          mint(inst, tyid, access.next);
-          break;
-        }
-        default:
-          break;
-        }
-      }
-    }
+  auto key = std::make_pair(tyid, alignment);
+  auto it = m_underaligned_aliases.find(key);
+  if (it != m_underaligned_aliases.end()) {
+    return it->second;
   }
+  // Every pointee reached by a load/store has an OpTypePointer, so its
+  // may_alias alias exists (and is a real typedef: non-dereferenceable kinds
+  // have a natural alignment of 1 and are never under-aligned).
+  auto base = m_type_info.at(tyid).alias;
+  auto name = m_name_allocator.allocate(base + "a" + std::to_string(alignment));
+  m_out.types << "typedef " << base << " __attribute__((aligned(" << alignment
+              << "))) " << name << ";" << std::endl;
+  m_underaligned_aliases.emplace(key, name);
+  return name;
 }
 
-std::string translator::src_access_pointee(uint32_t tyid,
-                                           const MemoryAccess &access) const {
+std::string translator_impl::src_access_pointee(uint32_t tyid,
+                                                const MemoryAccess &access) {
   if (is_underaligned(tyid, access)) {
-    return m_underaligned_aliases.at({tyid, access.alignment});
+    return underaligned_alias(tyid, access.alignment);
   }
-  return m_pointee_aliases.at(tyid);
+  return m_type_info.at(tyid).alias;
 }
 
-std::string translator::src_pointer_type(uint32_t storage, uint32_t tyid, bool signedty) const {
+std::string translator_impl::src_pointer_type(uint32_t storage, uint32_t tyid,
+                                              bool signedty) const {
   // Every pointee type (including arrays, which are struct-wrapped) has a flat
   // type name, so a pointer is just "<pointee> <addrspace>*". A
   // pointer-to-array becomes a pointer-to-wrapper, which carries the correct
   // element stride. Pointees are spelled through their may_alias typedef; see
   // declare_pointee_alias for why. The alias always exists here: every caller
   // spells a pointer type whose OpTypePointer has already been translated.
-  auto &aliases = signedty ? m_pointee_aliases_signed : m_pointee_aliases;
-  if (!aliases.count(tyid)) {
+  auto it = m_type_info.find(tyid);
+  std::string typestr;
+  if (it != m_type_info.end()) {
+    typestr = signedty ? it->second.signed_alias : it->second.alias;
+  }
+  if (typestr.empty()) {
     return note_unsupported("pointer to type " + std::to_string(tyid) +
                             " without a pointee alias");
   }
-  std::string typestr = aliases.at(tyid);
   std::string as = address_space_qualifier(storage);
   if (as == "UNIMPLEMENTED") {
     return as;
@@ -279,7 +291,7 @@ std::string translator::src_pointer_type(uint32_t storage, uint32_t tyid, bool s
   return typestr;
 }
 
-bool translator::translate_type(const Instruction &inst) {
+bool translator_impl::translate_type(const Instruction &inst) {
   std::string typestr;
   std::string signedtypestr;
   auto opcode = inst.opcode();
@@ -289,7 +301,7 @@ bool translator::translate_type(const Instruction &inst) {
     auto storage = inst.GetSingleWordOperand(1);
     auto type = inst.GetSingleWordOperand(2);
     declare_pointee_alias(type);
-    if (m_types_signed.count(type)) {
+    if (has_signed_type(type)) {
       signedtypestr = src_pointer_type(storage, type, true);
     }
     typestr = src_pointer_type(storage, type, false);
@@ -341,31 +353,37 @@ bool translator::translate_type(const Instruction &inst) {
   case spv::Op::OpTypeVector: {
     auto ctype = inst.GetSingleWordOperand(1);
     auto cnum = inst.GetSingleWordOperand(2);
+    if (type_for(ctype)->kind() == Type::Kind::kBool) {
+      // A mask; see src_type.
+      typestr = "int" + std::to_string(cnum);
+      break;
+    }
     typestr = src_type(ctype) + std::to_string(cnum);
     // Only integer element types have a signed counterpart; a float vector has
     // no signed form (and asking for one would now fail the translation).
-    if (m_types_signed.count(ctype)) {
+    if (has_signed_type(ctype)) {
       signedtypestr = src_type_signed(ctype) + std::to_string(cnum);
     }
     break;
   }
   case spv::Op::OpTypeStruct: { // TODO support volatile members
     // Declare the structure type. Pointer leaves are encoded as integers (see
-    // src_aggregate_element_type), as OpenCL forbids pointers in aggregates.
-    m_src << "struct " + var_for(result) + " {" << std::endl;
+    // src_storage_type), as OpenCL forbids pointers in aggregates.
+    auto &os = m_out.types;
+    os << "struct " + name_of(result) + " {" << std::endl;
     for (uint32_t opidx = 1; opidx < inst.NumOperands(); opidx++) {
       auto mid = inst.GetSingleWordOperand(opidx);
-      m_src << "  " << src_aggregate_element_type(mid) << " m"
-            << std::to_string(opidx - 1) << ";" << std::endl;
+      os << "  " << src_storage_type(mid) << " m" << std::to_string(opidx - 1)
+         << ";" << std::endl;
     }
-    m_src << "}";
+    os << "}";
     if (m_packed.count(result)) {
-      m_src << " __attribute__((packed))";
+      os << " __attribute__((packed))";
     }
-    m_src << ";" << std::endl;
+    os << ";" << std::endl;
 
     // Prepare the type name
-    typestr = "struct " + var_for(result);
+    typestr = "struct " + name_of(result);
     break;
   }
   case spv::Op::OpTypeArray: {
@@ -379,10 +397,9 @@ bool translator::translate_type(const Instruction &inst) {
     if (len == 0) {
       return false;
     }
-    std::string aname = make_valid_identifier("arr" + std::to_string(result));
-    m_src << "typedef struct { " << src_aggregate_element_type(elemtyid)
-          << " e[" << std::to_string(len) << "]; } " << aname << ";"
-          << std::endl;
+    auto aname = m_name_allocator.allocate("arr" + std::to_string(result));
+    m_out.types << "typedef struct { " << src_storage_type(elemtyid) << " e["
+                << std::to_string(len) << "]; } " << aname << ";" << std::endl;
     typestr = aname;
     break;
   }
@@ -445,7 +462,7 @@ bool translator::translate_type(const Instruction &inst) {
   case spv::Op::OpTypeOpaque: {
     auto name = inst.GetOperand(1).AsString();
     typestr = "struct " + name;
-    m_src << typestr << ";" << std::endl;
+    m_out.types << typestr << ";" << std::endl;
     break;
   }
   case spv::Op::OpTypeBool:
@@ -464,15 +481,14 @@ bool translator::translate_type(const Instruction &inst) {
     return false;
   }
 
-  m_types[result] = typestr;
-  if (signedtypestr != "") {
-    m_types_signed[result] = signedtypestr;
-  }
+  auto &info = m_type_info[result];
+  info.name = typestr;
+  info.signed_name = signedtypestr;
 
   return true;
 }
 
-bool translator::translate_types_values() {
+bool translator_impl::translate_types_values() {
   for (auto &inst : m_ir->module()->types_values()) {
     auto opcode = inst.opcode();
     auto rtype = inst.type_id();
@@ -505,12 +521,13 @@ bool translator::translate_types_values() {
       case Type::Kind::kInteger: {
         auto tint = type->AsInteger();
         if (tint->width() <= 32) {
-          m_literals[result] = src_cast(rtype, std::to_string(op_val.words[0]));
+          m_bindings[result] =
+              cast_to(rtype, c::literal(std::to_string(op_val.words[0])));
         } else if (tint->width() == 64) {
           uint64_t w0 = op_val.words[0];
           uint64_t w1 = op_val.words[1];
           auto w = w1 << 32 | w0;
-          m_literals[result] = src_cast(rtype, std::to_string(w));
+          m_bindings[result] = cast_to(rtype, c::literal(std::to_string(w)));
         } else {
           std::cerr << "UNIMPLEMENTED integer constant width " << tint->width()
                     << std::endl;
@@ -519,67 +536,49 @@ bool translator::translate_types_values() {
         break;
       }
       case Type::Kind::kFloat: {
-        auto tfloat = type->AsFloat();
-        auto width = tfloat->width();
+        auto width = type->AsFloat()->width();
+        double val;
         std::ostringstream out;
         if (width == 16) {
-          uint32_t w0 = op_val.words[0];
-          cl_half h = w0 & 0xFFFF;
-          float val = cl_half_to_float(h);
-          // INFINITY/NAN are float macros; cast to half (the "infh"/"nanh" that
-          // a plain "<< val << \"h\"" would spell is not a valid literal).
-          if (std::isinf(val)) {
-            if (std::signbit(val)) {
-              out << "-";
-            }
-            out << "(half)INFINITY";
-          } else if (std::isnan(val)) {
-            out << "(half)NAN";
-          } else {
-            out.precision(11);
-            out << std::fixed << val << "h";
-          }
+          val = cl_half_to_float(op_val.words[0] & 0xFFFF);
+          out.precision(11);
+          out << std::fixed << val << "h";
         } else if (width == 32) {
           uint32_t w0 = op_val.words[0];
-          float val;
-          std::memcpy(&val, &w0, sizeof(val));
-          if (std::isinf(val)) {
-            if (std::signbit(val)) {
-              out << "-";
-            }
-            out << "INFINITY";
-          } else if (std::isnan(val)) {
-            out << "NAN";
-          } else {
-            out.precision(24);
-            out << std::fixed << val << "f";
-          }
+          float f;
+          std::memcpy(&f, &w0, sizeof(f));
+          val = f;
+          out.precision(24);
+          out << std::fixed << f << "f";
         } else if (width == 64) {
           uint64_t w0 = op_val.words[0];
           uint64_t w1 = op_val.words[1];
           auto w = w1 << 32 | w0;
-          double val;
           std::memcpy(&val, &w, sizeof(val));
-          // NAN/INFINITY are float macros; cast to double so double-typed uses
-          // (e.g. copysign(0.0, (double)NAN)) aren't ambiguous against the float
-          // overloads.
-          if (std::isinf(val)) {
-            if (std::signbit(val)) {
-              out << "-";
-            }
-            out << "(double)INFINITY";
-          } else if (std::isnan(val)) {
-            out << "(double)NAN";
-          } else {
-            out.precision(53);
-            out << std::fixed << val;
-          }
+          out.precision(53);
+          out << std::fixed << val;
         } else {
           std::cerr << "UNIMPLEMENTED float constant width " << width
                     << std::endl;
           return false;
         }
-        m_literals[result] = out.str();
+        if (std::isinf(val) || std::isnan(val)) {
+          // INFINITY/NAN are float macros. Cast them to the constant's type:
+          // for half there is no literal to spell ("infh" is not one), and
+          // for double the cast keeps double-typed uses (e.g.
+          // copysign(0.0, (double)NAN)) from being ambiguous against the
+          // float overloads.
+          auto special = c::literal(std::isinf(val) ? "INFINITY" : "NAN");
+          if (width != 32) {
+            special = cast_to(rtype, special);
+          }
+          if (std::isinf(val) && std::signbit(val)) {
+            special = c::unary("-", special);
+          }
+          m_bindings[result] = special;
+        } else {
+          m_bindings[result] = c::literal(out.str());
+        }
         break;
       }
       default:
@@ -590,123 +589,91 @@ bool translator::translate_types_values() {
       break;
     }
     case spv::Op::OpUndef:
-    case spv::Op::OpConstantNull: {
-      std::string cst;
-      if (!get_null_constant(rtype, cst)) {
-        return false;
-      }
-      m_literals[result] = cst;
+    case spv::Op::OpConstantNull:
+      m_bindings[result] = null_constant(rtype);
       break;
-    }
-    case spv::Op::OpConstantTrue: {
-      m_literals[result] = "true";
+    case spv::Op::OpConstantTrue:
+      m_bindings[result] = c::literal("true");
       break;
-    }
-    case spv::Op::OpConstantFalse: {
-      m_literals[result] = "false";
+    case spv::Op::OpConstantFalse:
+      m_bindings[result] = c::literal("false");
       break;
-    }
     case spv::Op::OpConstantSampler: {
       auto addressing_mode = inst.GetSingleWordOperand(2);
       auto normalised = inst.GetSingleWordOperand(3);
       auto filter_mode = inst.GetSingleWordOperand(4);
-      m_src << "constant sampler_t " << var_for(result) << " = ";
+      auto &os = m_out.globals;
+      os << "constant sampler_t " << name_of(result) << " = ";
       switch (addressing_mode) {
       case SpvSamplerAddressingModeClampToEdge:
-        m_src << "CLK_ADDRESS_CLAMP_TO_EDGE";
+        os << "CLK_ADDRESS_CLAMP_TO_EDGE";
         break;
       case SpvSamplerAddressingModeClamp:
-        m_src << "CLK_ADDRESS_CLAMP";
+        os << "CLK_ADDRESS_CLAMP";
         break;
       case SpvSamplerAddressingModeRepeat:
-        m_src << "CLK_ADDRESS_REPEAT";
+        os << "CLK_ADDRESS_REPEAT";
         break;
       case SpvSamplerAddressingModeRepeatMirrored:
-        m_src << "CLK_ADDRESS_MIRRORED_REPEAT";
+        os << "CLK_ADDRESS_MIRRORED_REPEAT";
         break;
       case SpvSamplerAddressingModeNone:
-        m_src << "CLK_ADDRESS_NONE";
+        os << "CLK_ADDRESS_NONE";
         break;
       }
 
-      m_src << " | ";
+      os << " | ";
 
       if (normalised) {
-        m_src << "CLK_NORMALIZED_COORDS_TRUE";
+        os << "CLK_NORMALIZED_COORDS_TRUE";
       } else {
-        m_src << "CLK_NORMALIZED_COORDS_FALSE";
+        os << "CLK_NORMALIZED_COORDS_FALSE";
       }
 
-      m_src << " | ";
+      os << " | ";
 
       switch (filter_mode) {
       case SpvSamplerFilterModeNearest:
-        m_src << "CLK_FILTER_NEAREST";
+        os << "CLK_FILTER_NEAREST";
         break;
       case SpvSamplerFilterModeLinear:
-        m_src << "CLK_FILTER_LINEAR";
+        os << "CLK_FILTER_LINEAR";
         break;
       }
 
-      m_src << ";" << std::endl;
+      os << ";" << std::endl;
 
       break;
     }
     case spv::Op::OpConstantComposite: {
       auto type = type_for(rtype);
-      std::string lit;
+      std::vector<c::expr_ref> elems;
+      auto defuse = m_ir->get_def_use_mgr();
+      for (uint32_t opidx = 2; opidx < inst.NumOperands(); opidx++) {
+        auto eid = inst.GetSingleWordOperand(opidx);
+        if (type->kind() == Type::Kind::kVector &&
+            type->AsVector()->element_type()->kind() == Type::Kind::kBool) {
+          // A mask; see src_type.
+          bool set = defuse->GetDef(eid)->opcode() == spv::Op::OpConstantTrue;
+          elems.push_back(c::literal(set ? "-1" : "0"));
+        } else {
+          elems.push_back(to_component(rtype, type_id_for(eid), value(eid)));
+        }
+      }
       switch (type->kind()) {
-      case Type::Kind::kVector: {
-        auto tvec = type->AsVector();
-        // ((type)(c0, c1, ..., cN))
-        lit = "((" + src_type(rtype) + ")(";
-        const char *sep = "";
-        for (uint32_t opidx = 2; opidx < tvec->element_count() + 2; opidx++) {
-          auto cid = inst.GetSingleWordOperand(opidx);
-          lit += sep;
-          lit += m_literals[cid];
-          sep = ", ";
-        }
-        lit += "))";
-        m_literals[result] = lit;
+      case Type::Kind::kVector:
+        m_bindings[result] = c::vector_literal(src_type(rtype), elems);
         break;
-      }
-      case Type::Kind::kStruct: {
-        auto tstruct = type->AsStruct();
-        // ((type){m0, m1, ..., mN})
-        lit = "((" + src_type(rtype) + "){";
-        const char *sep = "";
-        for (uint32_t opidx = 2; opidx < tstruct->element_types().size() + 2;
-             opidx++) {
-          auto mid = inst.GetSingleWordOperand(opidx);
-          lit += sep;
-          lit += m_literals[mid];
-          sep = ", ";
-        }
-        lit += "})";
-        m_literals[result] = lit;
+      case Type::Kind::kStruct:
+        m_bindings[result] = c::compound_literal(src_type(rtype), elems);
         break;
-      }
-      case Type::Kind::kArray: {
+      case Type::Kind::kArray:
         // Array types are wrapped in a struct, so the initializer is
-        // ((arrN){{ e0, e1, ... }}): outer braces for the wrapper, inner for
-        // the element array member 'e'.
-        uint32_t num_elems = array_type_get_length(rtype);
-        if (num_elems == 0) {
-            return false;
-        }
-        lit = "((" + src_type(rtype) + "){{";
-        const char *sep = "";
-        for (uint32_t opidx = 2; opidx < num_elems + 2; opidx++) {
-          auto mid = inst.GetSingleWordOperand(opidx);
-          lit += sep;
-          lit += m_literals[mid];
-          sep = ", ";
-        }
-        lit += "}})";
-        m_literals[result] = lit;
+        // (arrN){{e0, e1, ...}}: outer braces for the wrapper, inner for the
+        // element array member 'e'.
+        m_bindings[result] =
+            c::compound_literal(src_type(rtype), {c::init_list(elems)});
         break;
-      }
       default:
         std::cerr << "UNIMPLEMENTED OpConstantComposite type " << type->kind()
                   << std::endl;
@@ -726,7 +693,8 @@ bool translator::translate_types_values() {
       case spv::Op::OpConvertUToPtr:
       case spv::Op::OpConvertPtrToU: {
         // The result type already carries the destination type/address space.
-        m_literals[result] = src_cast(rtype, inst.GetSingleWordOperand(3));
+        m_bindings[result] =
+            cast_to(rtype, value(inst.GetSingleWordOperand(3)));
         break;
       }
       case spv::Op::OpPtrAccessChain:
@@ -741,8 +709,8 @@ bool translator::translate_types_values() {
         }
         auto base = inst.GetSingleWordOperand(3);
         auto index = inst.GetSingleWordOperand(4);
-        m_literals[result] = src_cast(
-            rtype, "(" + var_for(base) + " + " + var_for(index) + ")");
+        m_bindings[result] =
+            cast_to(rtype, c::binary("+", value(base), value(index)));
         break;
       }
       default:
@@ -773,17 +741,16 @@ bool translator::translate_types_values() {
 
       if (storage == SpvStorageClassWorkgroup) {
         // Mirror the function-local OpVariable pattern: declare the storage and
-        // a pointer to it, so var_for() is a pointer. Array types are
-        // struct-wrapped (no array-to-pointer decay), so the variable can't be
-        // used directly as a pointer the way a bare local array used to be.
-        auto storagename =
-            make_valid_identifier(var_for(result) + "_storage");
+        // a pointer to it, so the variable's value is a pointer. Array types
+        // are struct-wrapped (no array-to-pointer decay), so the variable can't
+        // be used directly as a pointer the way a bare local array used to be.
+        auto &storagename = derived_name(result, "_storage");
         std::string local_var_decl =
             "local " +
             src_type_memory_object_declaration(typointeeid, result,
                                                storagename) +
-            "; " + src_type(rtype) + " " + var_for(result) + " = &" +
-            storagename;
+            "; " + src_var_decl(result) + " = " +
+            c::print(c::address_of(c::name(storagename)));
         m_local_variable_decls[result] = local_var_decl;
       } else if (storage == SpvStorageClassUniformConstant) {
         // Check if initializer is a string array and cache it for later use
@@ -803,21 +770,16 @@ bool translator::translate_types_values() {
         // The SPIR-V id of the variable is a pointer, but OpenCL 1.2 forbids
         // program-scope pointer variables, so we declare the storage as a value
         // and make every reference to the variable take its address.
-        auto storagename = make_valid_identifier(var_for(result) + "_storage");
-        m_src << "constant "
-              << src_type_memory_object_declaration(typointeeid, result,
-                                                    storagename);
+        auto &storagename = derived_name(result, "_storage");
+        m_out.globals << "constant "
+                      << src_type_memory_object_declaration(typointeeid, result,
+                                                            storagename);
         if (inst.NumOperands() > 3) {
           auto init = inst.GetSingleWordOperand(3);
-          m_src << " = " << var_for(init);
+          m_out.globals << " = " << c::print(value(init));
         }
-        m_src << ";" << std::endl;
-        m_names[result] = "(&" + storagename + ")";
-        // The storage name already captured any linkage name; drop the export/
-        // import alias so references resolve through m_names (the &storage form)
-        // rather than the bare linkage identifier, which is never declared.
-        m_exports.erase(result);
-        m_imports.erase(result);
+        m_out.globals << ";" << std::endl;
+        m_bindings[result] = c::address_of(c::name(storagename));
       } else if (storage == SpvStorageClassCrossWorkgroup) {
         // Program-scope global variable. Legal only from OpenCL C 2.0 on; below
         // that, program-scope variables must live in the constant address space.
@@ -829,21 +791,16 @@ bool translator::translate_types_values() {
         }
         // As with UniformConstant, declare the storage as a value and make every
         // reference take its address (the SPIR-V id is a pointer to it).
-        auto storagename = make_valid_identifier(var_for(result) + "_storage");
-        m_src << "global "
-              << src_type_memory_object_declaration(typointeeid, result,
-                                                    storagename);
+        auto &storagename = derived_name(result, "_storage");
+        m_out.globals << "global "
+                      << src_type_memory_object_declaration(typointeeid, result,
+                                                            storagename);
         if (inst.NumOperands() > 3) {
           auto init = inst.GetSingleWordOperand(3);
-          m_src << " = " << var_for(init);
+          m_out.globals << " = " << c::print(value(init));
         }
-        m_src << ";" << std::endl;
-        m_names[result] = "(&" + storagename + ")";
-        // The storage name already captured any linkage name; drop the export/
-        // import alias so references resolve through m_names (the &storage form)
-        // rather than the bare linkage identifier, which is never declared.
-        m_exports.erase(result);
-        m_imports.erase(result);
+        m_out.globals << ";" << std::endl;
+        m_bindings[result] = c::address_of(c::name(storagename));
       } else {
         std::cerr << "UNIMPLEMENTED global variable with storage class "
                   << storage << std::endl;

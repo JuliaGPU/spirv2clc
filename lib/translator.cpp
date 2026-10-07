@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "translator.h"
 #include "spirv2clc.h"
 
 #define CL_TARGET_OPENCL_VERSION 120
@@ -90,13 +91,27 @@ const spvtools::MessageConsumer spvtools_message_consumer =
 namespace spirv2clc {
 
 translator::translator(spv_target_env env, unsigned opencl_c_version)
-    : m_target_env(env), m_opencl_c_version(opencl_c_version) {}
+    : m_impl(std::make_unique<translator_impl>(env, opencl_c_version)) {}
 
 translator::~translator() = default;
 translator::translator(translator &&) = default;
 translator &translator::operator=(translator &&) = default;
 
-std::string translator::note_unsupported(const std::string &what) const {
+int translator::translate(const std::string &assembly, std::string *srcout) {
+  return m_impl->translate(assembly, srcout);
+}
+
+int translator::translate(const std::vector<uint32_t> &binary,
+                          std::string *srcout) {
+  return m_impl->translate(binary, srcout);
+}
+
+translator_impl::translator_impl(spv_target_env env, unsigned opencl_c_version)
+    : m_target_env(env), m_opencl_c_version(opencl_c_version) {}
+
+translator_impl::~translator_impl() = default;
+
+std::string translator_impl::note_unsupported(const std::string &what) const {
   std::cerr << "UNIMPLEMENTED " << what << std::endl;
   m_translation_failed = true;
   return "UNIMPLEMENTED";
@@ -107,13 +122,14 @@ std::string translator::note_unsupported(const std::string &what) const {
 #include "instns.cpp"
 #include "instns_ext.cpp"
 
-bool translator::translate_capabilities() {
+bool translator_impl::translate_capabilities() {
   // Emit each enabling pragma at most once, even when several capabilities map
   // to the same extension (e.g. the various subgroup capabilities).
   std::unordered_set<std::string> enabled_extensions;
   auto enable_extension = [&](const char *ext) {
     if (enabled_extensions.insert(ext).second) {
-      m_src << "#pragma OPENCL EXTENSION " << ext << " : enable" << std::endl;
+      m_out.extensions << "#pragma OPENCL EXTENSION " << ext << " : enable"
+                       << std::endl;
     }
   };
   // cl_khr_subgroups is an OpenCL C 2.0 extension (promoted to the
@@ -201,7 +217,7 @@ bool translator::translate_capabilities() {
   return true;
 }
 
-bool translator::translate_extensions() const {
+bool translator_impl::translate_extensions() const {
   // SPIR-V extensions we can honor; they need no emission of their own (the
   // capabilities/instructions they enable are handled elsewhere).
   static const std::unordered_set<std::string> handled = {
@@ -220,7 +236,7 @@ bool translator::translate_extensions() const {
   return true;
 }
 
-bool translator::translate_extended_instructions_imports() const {
+bool translator_impl::translate_extended_instructions_imports() const {
   for (auto &inst : m_ir->ext_inst_imports()) {
     assert(inst.opcode() == spv::Op::OpExtInstImport);
     auto name = inst.GetOperand(1).AsString();
@@ -232,13 +248,16 @@ bool translator::translate_extended_instructions_imports() const {
   return true;
 }
 
-bool translator::translate_memory_model() const {
+bool translator_impl::translate_memory_model() {
   auto inst = m_ir->module()->GetMemoryModel();
   auto add = inst->GetSingleWordOperand(0);
   auto mem = inst->GetSingleWordOperand(1);
 
-  if ((add != SpvAddressingModelPhysical32) &&
-      (add != SpvAddressingModelPhysical64)) {
+  if (add == SpvAddressingModelPhysical32) {
+    m_pointer_width = 32;
+  } else if (add == SpvAddressingModelPhysical64) {
+    m_pointer_width = 64;
+  } else {
     return false;
   }
   if (mem != SpvMemoryModelOpenCL) {
@@ -248,7 +267,7 @@ bool translator::translate_memory_model() const {
   return true;
 }
 
-bool translator::translate_entry_points() {
+bool translator_impl::translate_entry_points() {
   for (auto &ep : m_ir->module()->entry_points()) {
     auto model = ep.GetSingleWordOperand(0);
     auto func = ep.GetSingleWordOperand(1);
@@ -264,7 +283,7 @@ bool translator::translate_entry_points() {
   return true;
 }
 
-bool translator::translate_execution_modes() {
+bool translator_impl::translate_execution_modes() {
   for (auto &em : m_ir->module()->execution_modes()) {
     auto ep = em.GetSingleWordOperand(0);
     auto mode = em.GetSingleWordOperand(1);
@@ -297,7 +316,7 @@ bool translator::translate_execution_modes() {
   return true;
 }
 
-bool translator::translate_debug_instructions() {
+bool translator_impl::translate_debug_instructions() {
   // Debug 1
   for (auto &inst : m_ir->module()->debugs1()) {
     auto opcode = inst.opcode();
@@ -318,38 +337,12 @@ bool translator::translate_debug_instructions() {
     switch (opcode) {
     case spv::Op::OpName: {
       auto id = inst.GetSingleWordOperand(0);
-      auto name = inst.GetOperand(1).AsString();
-      // Sanitize into a valid C identifier: map any character that isn't a
-      // letter, digit or underscore to '_' (e.g. Julia names like
-      // "a::CLDeviceArray"), and avoid a leading digit.
-      auto valid_char = [](char c) {
-        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-               (c >= '0' && c <= '9') || c == '_';
-      };
-      for (auto &ch : name) {
-        if (!valid_char(ch)) {
-          ch = '_';
-        }
-      }
-      if (!name.empty() && name[0] >= '0' && name[0] <= '9') {
-        name = "_" + name;
-      }
-      m_names[id] = name;
+      m_debug_names[id] = inst.GetOperand(1).AsString();
       break;
     }
     default:
       std::cerr << "UNIMPLEMENTED debug instructions " << opcode << ".\n";
       return false;
-    }
-  }
-
-  // Fixup names to avoid identifiers invalid in OpenCL C
-  for (auto &id_name : m_names) {
-    auto &id = id_name.first;
-    auto &name = id_name.second;
-    if (gReservedIdentifiers.count(name)) {
-      std::string newname = make_valid_identifier(name);
-      m_names[id] = newname;
     }
   }
 
@@ -363,7 +356,7 @@ bool translator::translate_debug_instructions() {
   return true;
 }
 
-bool translator::translate_annotations() {
+bool translator_impl::translate_annotations() {
   for (auto &inst : m_ir->module()->annotations()) {
     auto opcode = inst.opcode();
     switch (opcode) {
@@ -552,7 +545,55 @@ bool translator::translate_annotations() {
   return true;
 }
 
-void translator::compute_workgroup_params() {
+void translator_impl::assign_names() {
+  // Names fixed by the module's interface first, so nothing else can take
+  // them. Entry points are named by their OpEntryPoint.
+  auto fix = [this](uint32_t id, const std::string &name) {
+    if (!m_names.count(id)) {
+      m_name_allocator.reserve(name);
+      m_names[id] = name;
+    }
+  };
+  for (auto &ep : m_entry_points) {
+    fix(ep.first, ep.second);
+  }
+  for (auto &exp : m_exports) {
+    fix(exp.first, exp.second);
+  }
+  for (auto &imp : m_imports) {
+    fix(imp.first, imp.second);
+  }
+  // Then the OpNames, before the made-up "v<id>" names so that those yield on
+  // a clash. Both in module order, for stable output.
+  for (bool named : {true, false}) {
+    m_ir->module()->ForEachInst([this, named](const Instruction *inst) {
+      auto id = inst->result_id();
+      if (id == 0 || m_names.count(id)) {
+        return;
+      }
+      auto it = m_debug_names.find(id);
+      bool has_name = it != m_debug_names.end() && !it->second.empty();
+      if (has_name == named) {
+        m_names[id] = m_name_allocator.allocate(
+            named ? it->second : "v" + std::to_string(id));
+      }
+    });
+  }
+}
+
+const std::string &translator_impl::derived_name(uint32_t id,
+                                                 const std::string &suffix) {
+  auto key = std::make_pair(id, suffix);
+  auto it = m_derived_names.find(key);
+  if (it == m_derived_names.end()) {
+    it = m_derived_names
+             .emplace(key, m_name_allocator.allocate(name_of(id) + suffix))
+             .first;
+  }
+  return it->second;
+}
+
+void translator_impl::compute_workgroup_params() {
   auto defuse = m_ir->get_def_use_mgr();
   for (auto &func : *m_ir->module()) {
     auto fid = func.DefInst().result_id();
@@ -596,7 +637,8 @@ void translator::compute_workgroup_params() {
   }
 }
 
-void translator::emit_function_signature(Function &func, bool is_prototype) {
+void translator_impl::emit_function_signature(Function &func,
+                                              bool is_prototype) {
   auto &dinst = func.DefInst();
   auto rtype = dinst.type_id();
   auto result = dinst.result_id();
@@ -604,52 +646,53 @@ void translator::emit_function_signature(Function &func, bool is_prototype) {
 
   bool entrypoint = m_entry_points.count(result) != 0;
   bool is_external = m_imports.count(result) != 0;
+  auto &os = is_prototype ? m_out.prototypes : m_out.functions;
 
   if (is_prototype) {
     // For prototypes, only emit static non-entry, non-external functions
     if (entrypoint || is_external) {
       return;
     }
-    m_src << "static ";
+    os << "static ";
   } else {
     // For definitions, emit full declaration logic
     if (is_external) {
-      m_src << "extern ";
+      os << "extern ";
     } else if ((m_exports.count(result) == 0) && !entrypoint) {
-      m_src << "static ";
+      os << "static ";
     }
   }
 
   if (control & SpvFunctionControlInlineMask) {
-    m_src << "inline ";
+    os << "inline ";
   }
 
-  m_src << src_type(rtype) + " ";
+  os << src_type(rtype) + " ";
   if (entrypoint && !is_prototype) {
-    m_src << "kernel ";
+    os << "kernel ";
     if (m_entry_points_local_size.count(result)) {
       auto &req = m_entry_points_local_size.at(result);
-      m_src << "__attribute((reqd_work_group_size(";
-      m_src << std::get<0>(req) << "," << std::get<1>(req) << ","
-            << std::get<2>(req);
-      m_src << "))) ";
+      os << "__attribute((reqd_work_group_size(";
+      os << std::get<0>(req) << "," << std::get<1>(req) << ","
+         << std::get<2>(req);
+      os << "))) ";
     }
     if (m_entry_points_subgroup_size.count(result)) {
-      m_src << "__attribute((intel_reqd_sub_group_size("
-            << m_entry_points_subgroup_size.at(result) << "))) ";
+      os << "__attribute((intel_reqd_sub_group_size("
+         << m_entry_points_subgroup_size.at(result) << "))) ";
     }
-    m_src << m_entry_points.at(result);
+    os << m_entry_points.at(result);
   } else {
-    m_src << var_for(result);
+    os << name_of(result);
   }
-  m_src << "(";
+  os << "(";
   std::string sep = "";
-  func.ForEachParam([this, &sep](const Instruction *inst) {
+  func.ForEachParam([this, &sep, &os](const Instruction *inst) {
     auto type = inst->type_id();
     auto result = inst->result_id();
-    m_src << sep;
+    os << sep;
     if (m_nowrite_params.count(result)) {
-      m_src << "const ";
+      os << "const ";
     }
 
     if (m_byval_params.count(result)) {
@@ -659,9 +702,9 @@ void translator::emit_function_signature(Function &func, bool is_prototype) {
       auto ptr_type = param_type->AsPointer();
       auto pointee_type = ptr_type->pointee_type();
       auto pointee_type_id = type_id_for(pointee_type);
-      m_src << src_type(pointee_type_id) << " " << var_for(result) << "_value";
+      os << src_type(pointee_type_id) << " " << derived_name(result, "_value");
     } else {
-      m_src << src_type_memory_object_declaration(type, result);
+      os << src_type_memory_object_declaration(type, result);
     }
     sep = ", ";
   });
@@ -674,62 +717,59 @@ void translator::emit_function_signature(Function &func, bool is_prototype) {
     if (it != m_function_workgroup_params.end()) {
       auto defuse = m_ir->get_def_use_mgr();
       for (auto wgvar : it->second) {
-        m_src << sep;
-        m_src << src_type(defuse->GetDef(wgvar)->type_id()) << " "
-              << var_for(wgvar);
+        os << sep;
+        os << src_type(defuse->GetDef(wgvar)->type_id()) << " "
+           << name_of(wgvar);
         sep = ", ";
       }
     }
   }
 
-  m_src << ")";
+  os << ")";
   if (is_prototype) {
-    m_src << ";" << std::endl;
+    os << ";" << std::endl;
   }
 }
 
-bool translator::translate_function(Function &func) {
+bool translator_impl::translate_function(Function &func) {
   auto &dinst = func.DefInst();
   auto result = dinst.result_id();
 
-  bool decl = false;
   bool entrypoint = m_entry_points.count(result) != 0;
+  auto &os = m_out.functions;
 
   if (m_entry_points_contraction_off.count(result)) {
-    m_src << "#pragma OPENCL FP_CONTRACT OFF" << std::endl;
+    os << "#pragma OPENCL FP_CONTRACT OFF" << std::endl;
   }
 
-  // Check if this is just a declaration
-  if (m_imports.count(result)) {
-    decl = true;
-  }
-
-  // Emit function signature
   emit_function_signature(func, false);
 
-  if (decl) {
-    m_src << ";" << std::endl;
+  // Imported functions are only declared.
+  if (m_imports.count(result)) {
+    os << ";" << std::endl;
     return true;
-  } else {
-    m_src << "{" << std::endl;
   }
+
+  function_builder fb;
 
   // Declare variables in the local address space used by each kernel at the
   // beginning of the kernel function. If the kernel's call tree references
   // a Workgroup variable, paste the declaration we have prepared as part of
   // translating global variables.
   if (entrypoint) {
-    std::unordered_set<uint32_t> used_globals_in_local_as;
-    IRContext::ProcessFunction process_fn = [this, &used_globals_in_local_as](Function* func) -> bool {
+    std::set<uint32_t> used_globals_in_local_as;
+    IRContext::ProcessFunction process_fn =
+        [this, &used_globals_in_local_as](Function *func) -> bool {
       for (auto &bb : *func) {
         for (auto &inst : bb) {
-          for (auto& op : inst) {
+          for (auto &op : inst) {
             if (spvIsIdType(op.type)) {
               auto used_inst_id = op.AsId();
               auto defuse = m_ir->get_def_use_mgr();
               auto used_inst = defuse->GetDef(used_inst_id);
               if (used_inst->opcode() == spv::Op::OpVariable) {
-                if (used_inst->GetSingleWordOperand(2) == SpvStorageClassWorkgroup) {
+                if (used_inst->GetSingleWordOperand(2) ==
+                    SpvStorageClassWorkgroup) {
                   used_globals_in_local_as.insert(used_inst_id);
                 }
               }
@@ -744,91 +784,91 @@ bool translator::translate_function(Function &func) {
     m_ir->ProcessCallTreeFromRoots(process_fn, &roots);
 
     for (auto lvarid : used_globals_in_local_as) {
-      m_src << m_local_variable_decls.at(lvarid) << ";\n";
+      fb.declare_upfront(m_local_variable_decls.at(lvarid));
     }
   }
 
-  // First collect information about OpPhi's
-  for (auto &bb : func) {
-    for (auto &inst : bb) {
-      auto result = inst.result_id();
-      if (inst.opcode() != spv::Op::OpPhi) {
-        continue;
-      }
-      m_phi_vals[&func].push_back(result);
-
-      for (unsigned i = 2; i < inst.NumOperands(); i += 2) {
-        auto var = inst.GetSingleWordOperand(i);
-        auto parent = inst.GetSingleWordOperand(i + 1);
-        auto parentbb = func.FindBlock(parent);
-
-        m_phi_assigns[&*parentbb].push_back(std::make_pair(result, var));
-      }
-    }
-  }
-
-  // Now translate
-  bool error = false;
-
-  // Add helper variables for byval arguments containing a pointer
-  // (for compatibility with existing code)
-  func.ForEachParam([this](const Instruction *inst) {
+  // ByVal parameters are passed by value; the body expects a pointer to it.
+  func.ForEachParam([this, &fb](const Instruction *inst) {
     auto result = inst->result_id();
     if (m_byval_params.count(result)) {
-      m_src << "  " << src_type(inst->type_id()) << " " << var_for(result) << " = &" << var_for(result) << "_value;\n";
+      fb.declare_upfront(
+          src_var_decl(result) + " = " +
+          c::print(c::address_of(c::name(derived_name(result, "_value")))));
     }
   });
 
-  if (m_phi_vals.count(&func)) {
-    for (auto phival : m_phi_vals.at(&func)) {
-      auto phitype = type_id_for(phival);
-      m_src << "  " << src_type(phitype) << " " << var_for(phival) << ";\n";
+  // Lower OpPhi out of SSA in two phases. Each predecessor stages the incoming
+  // value in a per-phi temporary before its terminator, and the phi block
+  // commits the temporaries to the phi variables on entry. Writing the phi
+  // variables directly in the predecessor would be wrong twice over: the write
+  // also happens when the branch leaves through another edge (the loop exit
+  // then sees the next iteration's value), and sequential writes break when
+  // one phi feeds another of the same block (a swap reads the clobbered value).
+  // Block -> (phi, incoming value) pairs to stage at its end.
+  std::unordered_map<const BasicBlock *,
+                     std::vector<std::pair<uint32_t, uint32_t>>>
+      phi_incoming;
+  for (auto &bb : func) {
+    for (auto &inst : bb) {
+      if (inst.opcode() != spv::Op::OpPhi) {
+        continue;
+      }
+      auto phi = inst.result_id();
+      fb.declare_upfront(src_var_decl(phi));
+      fb.declare_upfront(
+          src_var_decl(type_id_for(phi), derived_name(phi, "_phi")));
+      for (unsigned i = 2; i < inst.NumOperands(); i += 2) {
+        auto incoming = inst.GetSingleWordOperand(i);
+        auto parent = func.FindBlock(inst.GetSingleWordOperand(i + 1));
+        phi_incoming[&*parent].emplace_back(phi, incoming);
+      }
     }
   }
+
+  bool error = false;
   for (auto &bb : func) {
-    m_src << var_for(bb.id()) + ":;" << std::endl;
-    // Translate all instructions except the terminator
+    fb.label(name_of(bb.id()));
+    // Translate all instructions except the terminator. The phis lead the
+    // block; each commits the value staged by the predecessor we came from.
     for (auto &inst : bb) {
       if (&inst == bb.terminator()) {
         break;
       }
-      std::string isrc;
-      if (!translate_instruction(inst, isrc)) {
+      if (inst.opcode() == spv::Op::OpPhi) {
+        auto phi = inst.result_id();
+        fb.assign(c::name(name_of(phi)), c::name(derived_name(phi, "_phi")));
+        continue;
+      }
+      if (!translate_instruction(inst, fb)) {
         error = true;
       }
-      if (isrc != "") {
-        m_src << "  " << isrc << ";\n";
+    }
+    // Stage the incoming values of the successors' phis. Staging for every
+    // successor, not just the one taken, is harmless: a temporary is only read
+    // on entry to its phi's block.
+    auto it = phi_incoming.find(&bb);
+    if (it != phi_incoming.end()) {
+      for (auto &phi_value : it->second) {
+        fb.assign(c::name(derived_name(phi_value.first, "_phi")),
+                  value(phi_value.second));
       }
     }
-    // Assign phi variables if this block can branch to other blocks with phi
-    // refering to this block
-    if (m_phi_assigns.count(&bb)) {
-      for (auto &phival_var : m_phi_assigns.at(&bb)) {
-        m_src << "  " << var_for(phival_var.first) << " = "
-              << var_for(phival_var.second) << ";\n";
-      }
-    }
-
-    // Translate the terminator
-    std::string isrc;
-    if (!translate_instruction(*bb.ctail(), isrc)) {
+    if (!translate_instruction(*bb.ctail(), fb)) {
       error = true;
-    }
-    if (isrc != "") {
-      m_src << "  " << isrc << ";\n";
     }
   }
 
-  m_src << "}\n";
+  os << "{" << std::endl << fb.render() << "}\n";
 
   if (m_entry_points_contraction_off.count(result)) {
-    m_src << "#pragma OPENCL FP_CONTRACT ON" << std::endl;
+    os << "#pragma OPENCL FP_CONTRACT ON" << std::endl;
   }
 
   return !error;
 }
 
-int translator::translate() {
+int translator_impl::translate() {
 
   reset();
 
@@ -872,14 +912,12 @@ int translator::translate() {
     return 1;
   }
 
+  assign_names();
+
   // 9. Type declarations, constants and global variables
   if (!translate_types_values()) {
     return 1;
   }
-
-  // Under-aligned accesses in the function bodies need reduced-alignment
-  // typedefs; mint them now, while still in the type section.
-  declare_underaligned_aliases();
 
   // Work out which non-entry functions reference module-scope Workgroup
   // variables, so their signatures and call sites can thread them through as
@@ -908,7 +946,8 @@ int translator::translate() {
   return 0;
 }
 
-bool translator::validate_module(const std::vector<uint32_t> &binary) const {
+bool translator_impl::validate_module(
+    const std::vector<uint32_t> &binary) const {
   spv_diagnostic diag;
   spv_context ctx = spvContextCreate(m_target_env);
   spv_result_t res =
@@ -923,7 +962,8 @@ bool translator::validate_module(const std::vector<uint32_t> &binary) const {
   return true;
 }
 
-int translator::translate(const std::string &assembly, std::string *srcout) {
+int translator_impl::translate(const std::string &assembly,
+                               std::string *srcout) {
 
   m_ir = BuildModule(m_target_env, spvtools_message_consumer, assembly);
 
@@ -936,14 +976,14 @@ int translator::translate(const std::string &assembly, std::string *srcout) {
   int ret = translate();
 
   if (ret == 0) {
-    *srcout = m_src.str();
+    *srcout = m_out.render();
   }
 
   return ret;
 }
 
-int translator::translate(const std::vector<uint32_t> &binary,
-                          std::string *srcout) {
+int translator_impl::translate(const std::vector<uint32_t> &binary,
+                               std::string *srcout) {
 
   m_ir = BuildModule(m_target_env, spvtools_message_consumer,
                      binary.data(), binary.size());
@@ -955,7 +995,7 @@ int translator::translate(const std::vector<uint32_t> &binary,
   int ret = translate();
 
   if (ret == 0) {
-    *srcout = m_src.str();
+    *srcout = m_out.render();
   }
 
   return ret;
