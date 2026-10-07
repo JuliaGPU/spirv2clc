@@ -114,7 +114,10 @@ c::expr_ref translator_impl::fence_flags(uint32_t mem_sem) const {
   if (mem_sem & SpvMemorySemanticsCrossWorkgroupMemoryMask) {
     add("CLK_GLOBAL_MEM_FENCE");
   }
-  if (mem_sem & SpvMemorySemanticsImageMemoryMask) {
+  // CLK_IMAGE_MEM_FENCE is OpenCL C 2.0. Before that, a kernel can't both write
+  // and read an image, so there are no image accesses to order.
+  if ((mem_sem & SpvMemorySemanticsImageMemoryMask) &&
+      m_opencl_c_version >= 200) {
     add("CLK_IMAGE_MEM_FENCE");
   }
   // Semantics with only an ordering (or subgroup memory, which has no OpenCL C
