@@ -1,0 +1,39 @@
+; OpAtomicSMin/SMax need the signed atomic_min/max overloads, but integers are
+; spelled unsigned (OpenCL SPIR-V integer types have no signedness), so the
+; pointer and value are reinterpreted as signed and the result converted back.
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL1.2 %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm --spirv-version=1.4 %s | %clang -c -cl-std=CL3.0 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm --spirv-version=1.4 %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Int64
+               OpCapability Int64Atomics
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+      %ulong = OpTypeInt 64 0
+       %p_gu = OpTypePointer CrossWorkgroup %uint
+       %p_gl = OpTypePointer CrossWorkgroup %ulong
+       %p_lu = OpTypePointer Workgroup %uint
+      %scope = OpConstant %uint 1
+        %sem = OpConstant %uint 0
+       %u_m1 = OpConstant %uint 4294967295
+       %l_m1 = OpConstant %ulong 18446744073709551615
+       %fnty = OpTypeFunction %void %p_gu %p_gl %p_lu
+          %k = OpFunction %void None %fnty
+         %pu = OpFunctionParameter %p_gu
+         %pl = OpFunctionParameter %p_gl
+         %lu = OpFunctionParameter %p_lu
+        %lbl = OpLabel
+       %smin = OpAtomicSMin %uint %pu %scope %sem %u_m1
+       %smax = OpAtomicSMax %ulong %pl %scope %sem %l_m1
+      %smaxl = OpAtomicSMax %uint %lu %scope %sem %u_m1
+       %umin = OpAtomicUMin %uint %pu %scope %sem %u_m1
+               OpReturn
+               OpFunctionEnd
+; CHECK: [[GU:ma[0-9]+]] global* [[PU:v[0-9]+]], [[GL:ma[0-9]+]] global* [[PL:v[0-9]+]], [[LU:ma[0-9]+]] local* [[PLU:v[0-9]+]]
+; CHECK: uint {{v[0-9]+}} = as_uint(atomic_min((([[GU]]s global*)[[PU]]), as_int(((uint)4294967295))));
+; CHECK: ulong {{v[0-9]+}} = as_ulong(atom_max((([[GL]]s global*)[[PL]]), as_long(((ulong)18446744073709551615))));
+; CHECK: uint {{v[0-9]+}} = as_uint(atomic_max((([[LU]]s local*)[[PLU]]), as_int(((uint)4294967295))));
+; CHECK: uint {{v[0-9]+}} = atomic_min([[PU]], ((uint)4294967295));
