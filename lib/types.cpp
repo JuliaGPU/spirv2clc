@@ -1,20 +1,60 @@
-std::string translator_impl::src_aggregate_element_type(uint32_t tyid) const {
-  // OpenCL forbids pointers inside structs/arrays, so encode every pointer leaf
-  // as a same-width integer (ulong under Physical64). Access chains reconstruct
-  // the real pointer type on the way in (see emit_access_chain). Non-pointer
-  // members keep their normal flat type name (arrays are struct-wrapped).
+std::string translator_impl::src_to_component(uint32_t composite_tyid,
+                                              uint32_t elem_tyid,
+                                              const std::string &value) const {
+  auto composite = type_for(composite_tyid)->kind();
+  if (composite == Type::Kind::kVector &&
+      type_for(elem_tyid)->kind() == Type::Kind::kBool) {
+    return "-(int)(" + value + ")";
+  }
+  if (composite == Type::Kind::kStruct || composite == Type::Kind::kArray) {
+    return src_to_storage(elem_tyid, value);
+  }
+  return value;
+}
+
+std::string
+translator_impl::src_from_component(uint32_t composite_tyid, uint32_t elem_tyid,
+                                    const std::string &component) const {
+  // A mask element (-1 or 0) needs no conversion: it is only ever used to
+  // initialize a bool, which normalizes it.
+  auto composite = type_for(composite_tyid)->kind();
+  if (composite == Type::Kind::kStruct || composite == Type::Kind::kArray) {
+    return src_from_storage(elem_tyid, component);
+  }
+  return component;
+}
+
+std::string translator_impl::src_storage_type(uint32_t tyid) const {
   if (type_for(tyid)->kind() == Type::Kind::kPointer) {
-    return "ulong";
+    return src_pointer_int_type();
   }
   return src_type(tyid);
 }
 
+std::string translator_impl::src_to_storage(uint32_t tyid,
+                                            const std::string &value) const {
+  if (type_for(tyid)->kind() == Type::Kind::kPointer) {
+    return "(" + src_storage_type(tyid) + ")(" + value + ")";
+  }
+  return value;
+}
+
+std::string translator_impl::src_from_storage(uint32_t tyid,
+                                              const std::string &stored) const {
+  if (type_for(tyid)->kind() == Type::Kind::kPointer) {
+    return "((" + src_type(tyid) + ")" + stored + ")";
+  }
+  return stored;
+}
+
 bool translator_impl::src_composite_path(const spvtools::opt::Instruction &inst,
                                          unsigned first, uint32_t tyid,
-                                         std::string &path,
-                                         uint32_t &leaf_tyid) const {
+                                         std::string &path, uint32_t &leaf_tyid,
+                                         uint32_t &parent_tyid) const {
   path.clear();
+  parent_tyid = 0;
   for (unsigned i = first; i < inst.NumOperands(); i++) {
+    parent_tyid = tyid;
     auto idx = inst.GetSingleWordOperand(i);
     auto type = type_for(tyid);
     switch (type->kind()) {
@@ -42,15 +82,6 @@ bool translator_impl::src_composite_path(const spvtools::opt::Instruction &inst,
   }
   leaf_tyid = tyid;
   return true;
-}
-
-std::string
-translator_impl::src_aggregate_element_value(uint32_t tyid,
-                                             uint32_t object) const {
-  if (type_for(tyid)->kind() == Type::Kind::kPointer) {
-    return "(" + src_aggregate_element_type(tyid) + ")(" + var_for(object) + ")";
-  }
-  return var_for(object);
 }
 
 std::string translator_impl::address_space_qualifier(uint32_t storage) const {
@@ -98,7 +129,8 @@ void translator_impl::declare_pointee_alias(uint32_t tyid) {
   // Called for the pointee of every OpTypePointer as it is translated, so all
   // typedefs land in the type section (after the pointee's own definition)
   // and every later spelling of a pointer type is a pure lookup.
-  if (m_pointee_aliases.count(tyid)) {
+  auto &info = m_type_info[tyid];
+  if (!info.alias.empty()) {
     return;
   }
   switch (type_for(tyid)->kind()) {
@@ -113,19 +145,19 @@ void translator_impl::declare_pointee_alias(uint32_t tyid) {
   default:
     // Not dereferenceable through reinterpreted pointers (void, images,
     // samplers, events, opaque structs); keep the raw spelling.
-    m_pointee_aliases[tyid] = src_type(tyid);
+    info.alias = src_type(tyid);
     return;
   }
   auto name = m_name_allocator.allocate("ma" + std::to_string(tyid));
   m_out.types << "typedef " << src_type(tyid) << " __attribute__((may_alias)) "
               << name << ";" << std::endl;
-  m_pointee_aliases[tyid] = name;
-  if (m_types_signed.count(tyid)) {
+  info.alias = name;
+  if (has_signed_type(tyid)) {
     auto signed_name = m_name_allocator.allocate(name + "s");
     m_out.types << "typedef " << src_type_signed(tyid)
                 << " __attribute__((may_alias)) " << signed_name << ";"
                 << std::endl;
-    m_pointee_aliases_signed[tyid] = signed_name;
+    info.signed_alias = signed_name;
   }
 }
 
@@ -184,7 +216,7 @@ uint32_t translator_impl::natural_alignment(uint32_t tyid) const {
     return align;
   }
   case Type::Kind::kPointer:
-    return 8; // pointers are 8 bytes wide under Physical64 (assumed throughout)
+    return m_pointer_width / 8;
   default:
     // bool, images, samplers, ...: never accessed through reinterpreted
     // pointers, and 1 can never be under-aligned.
@@ -216,7 +248,7 @@ std::string translator_impl::underaligned_alias(uint32_t tyid,
   // Every pointee reached by a load/store has an OpTypePointer, so its
   // may_alias alias exists (and is a real typedef: non-dereferenceable kinds
   // have a natural alignment of 1 and are never under-aligned).
-  auto base = m_pointee_aliases.at(tyid);
+  auto base = m_type_info.at(tyid).alias;
   auto name = m_name_allocator.allocate(base + "a" + std::to_string(alignment));
   m_out.types << "typedef " << base << " __attribute__((aligned(" << alignment
               << "))) " << name << ";" << std::endl;
@@ -229,7 +261,7 @@ std::string translator_impl::src_access_pointee(uint32_t tyid,
   if (is_underaligned(tyid, access)) {
     return underaligned_alias(tyid, access.alignment);
   }
-  return m_pointee_aliases.at(tyid);
+  return m_type_info.at(tyid).alias;
 }
 
 std::string translator_impl::src_pointer_type(uint32_t storage, uint32_t tyid,
@@ -240,12 +272,15 @@ std::string translator_impl::src_pointer_type(uint32_t storage, uint32_t tyid,
   // element stride. Pointees are spelled through their may_alias typedef; see
   // declare_pointee_alias for why. The alias always exists here: every caller
   // spells a pointer type whose OpTypePointer has already been translated.
-  auto &aliases = signedty ? m_pointee_aliases_signed : m_pointee_aliases;
-  if (!aliases.count(tyid)) {
+  auto it = m_type_info.find(tyid);
+  std::string typestr;
+  if (it != m_type_info.end()) {
+    typestr = signedty ? it->second.signed_alias : it->second.alias;
+  }
+  if (typestr.empty()) {
     return note_unsupported("pointer to type " + std::to_string(tyid) +
                             " without a pointee alias");
   }
-  std::string typestr = aliases.at(tyid);
   std::string as = address_space_qualifier(storage);
   if (as == "UNIMPLEMENTED") {
     return as;
@@ -264,7 +299,7 @@ bool translator_impl::translate_type(const Instruction &inst) {
     auto storage = inst.GetSingleWordOperand(1);
     auto type = inst.GetSingleWordOperand(2);
     declare_pointee_alias(type);
-    if (m_types_signed.count(type)) {
+    if (has_signed_type(type)) {
       signedtypestr = src_pointer_type(storage, type, true);
     }
     typestr = src_pointer_type(storage, type, false);
@@ -316,23 +351,28 @@ bool translator_impl::translate_type(const Instruction &inst) {
   case spv::Op::OpTypeVector: {
     auto ctype = inst.GetSingleWordOperand(1);
     auto cnum = inst.GetSingleWordOperand(2);
+    if (type_for(ctype)->kind() == Type::Kind::kBool) {
+      // A mask; see src_type.
+      typestr = "int" + std::to_string(cnum);
+      break;
+    }
     typestr = src_type(ctype) + std::to_string(cnum);
     // Only integer element types have a signed counterpart; a float vector has
     // no signed form (and asking for one would now fail the translation).
-    if (m_types_signed.count(ctype)) {
+    if (has_signed_type(ctype)) {
       signedtypestr = src_type_signed(ctype) + std::to_string(cnum);
     }
     break;
   }
   case spv::Op::OpTypeStruct: { // TODO support volatile members
     // Declare the structure type. Pointer leaves are encoded as integers (see
-    // src_aggregate_element_type), as OpenCL forbids pointers in aggregates.
+    // src_storage_type), as OpenCL forbids pointers in aggregates.
     auto &os = m_out.types;
     os << "struct " + var_for(result) + " {" << std::endl;
     for (uint32_t opidx = 1; opidx < inst.NumOperands(); opidx++) {
       auto mid = inst.GetSingleWordOperand(opidx);
-      os << "  " << src_aggregate_element_type(mid) << " m"
-         << std::to_string(opidx - 1) << ";" << std::endl;
+      os << "  " << src_storage_type(mid) << " m" << std::to_string(opidx - 1)
+         << ";" << std::endl;
     }
     os << "}";
     if (m_packed.count(result)) {
@@ -356,9 +396,8 @@ bool translator_impl::translate_type(const Instruction &inst) {
       return false;
     }
     auto aname = m_name_allocator.allocate("arr" + std::to_string(result));
-    m_out.types << "typedef struct { " << src_aggregate_element_type(elemtyid)
-                << " e[" << std::to_string(len) << "]; } " << aname << ";"
-                << std::endl;
+    m_out.types << "typedef struct { " << src_storage_type(elemtyid) << " e["
+                << std::to_string(len) << "]; } " << aname << ";" << std::endl;
     typestr = aname;
     break;
   }
@@ -440,10 +479,9 @@ bool translator_impl::translate_type(const Instruction &inst) {
     return false;
   }
 
-  m_types[result] = typestr;
-  if (signedtypestr != "") {
-    m_types_signed[result] = signedtypestr;
-  }
+  auto &info = m_type_info[result];
+  info.name = typestr;
+  info.signed_name = signedtypestr;
 
   return true;
 }
@@ -635,13 +673,20 @@ bool translator_impl::translate_types_values() {
       switch (type->kind()) {
       case Type::Kind::kVector: {
         auto tvec = type->AsVector();
+        bool mask = tvec->element_type()->kind() == Type::Kind::kBool;
+        auto defuse = m_ir->get_def_use_mgr();
         // ((type)(c0, c1, ..., cN))
         lit = "((" + src_type(rtype) + ")(";
         const char *sep = "";
         for (uint32_t opidx = 2; opidx < tvec->element_count() + 2; opidx++) {
           auto cid = inst.GetSingleWordOperand(opidx);
           lit += sep;
-          lit += m_literals[cid];
+          if (mask) {
+            bool set = defuse->GetDef(cid)->opcode() == spv::Op::OpConstantTrue;
+            lit += set ? "-1" : "0";
+          } else {
+            lit += var_for(cid);
+          }
           sep = ", ";
         }
         lit += "))";
@@ -657,7 +702,7 @@ bool translator_impl::translate_types_values() {
              opidx++) {
           auto mid = inst.GetSingleWordOperand(opidx);
           lit += sep;
-          lit += m_literals[mid];
+          lit += src_to_storage(type_id_for(mid), var_for(mid));
           sep = ", ";
         }
         lit += "})";
@@ -677,7 +722,7 @@ bool translator_impl::translate_types_values() {
         for (uint32_t opidx = 2; opidx < num_elems + 2; opidx++) {
           auto mid = inst.GetSingleWordOperand(opidx);
           lit += sep;
-          lit += m_literals[mid];
+          lit += src_to_storage(type_id_for(mid), var_for(mid));
           sep = ", ";
         }
         lit += "}})";

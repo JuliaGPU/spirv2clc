@@ -248,13 +248,16 @@ bool translator_impl::translate_extended_instructions_imports() const {
   return true;
 }
 
-bool translator_impl::translate_memory_model() const {
+bool translator_impl::translate_memory_model() {
   auto inst = m_ir->module()->GetMemoryModel();
   auto add = inst->GetSingleWordOperand(0);
   auto mem = inst->GetSingleWordOperand(1);
 
-  if ((add != SpvAddressingModelPhysical32) &&
-      (add != SpvAddressingModelPhysical64)) {
+  if (add == SpvAddressingModelPhysical32) {
+    m_pointer_width = 32;
+  } else if (add == SpvAddressingModelPhysical64) {
+    m_pointer_width = 64;
+  } else {
     return false;
   }
   if (mem != SpvMemoryModelOpenCL) {

@@ -41,16 +41,11 @@ uint32_t translator_impl::array_type_get_length(uint32_t tyid) const {
 }
 
 std::string translator_impl::src_var_decl(uint32_t tyid,
-                                          const std::string &name,
-                                          uint32_t val) const {
+                                          const std::string &name) const {
   // Array types are struct-wrapped and pointers/pointers-to-arrays all have a
   // registered flat type name, so a uniform "TYPE name" declaration works for
   // every type; no per-shape declarator construction is needed.
-  if (val != 0) {
-    return src_type_for_value(val) + " " + name;
-  } else {
-    return src_type(tyid) + " " + name;
-  }
+  return src_type(tyid) + " " + name;
 }
 
 std::string
@@ -106,54 +101,63 @@ std::string translator_impl::src_type_memory_object_declaration(
   return ret;
 }
 
-std::string translator_impl::src_type_boolean_for_val(uint32_t val) const {
-  if (m_boolean_src_types.count(val)) {
-    return m_boolean_src_types.at(val);
-  } else {
-    auto type = type_for_val(val);
-    if (type->kind() != Type::Kind::kVector) {
-      return "int";
-    } else {
-      auto vtype = type->AsVector();
-      auto etype = vtype->element_type();
-      auto ecnt = vtype->element_count();
-      auto ekind = etype->kind();
-
-      switch (ekind) {
-      case Type::Kind::kInteger: {
-        auto width = etype->AsInteger()->width();
-        switch (width) {
-        case 8:
-          return "char" + std::to_string(ecnt);
-        case 16:
-          return "short" + std::to_string(ecnt);
-        case 32:
-          return "int" + std::to_string(ecnt);
-        case 64:
-          return "long" + std::to_string(ecnt);
-        }
-        break;
-      }
-      case Type::Kind::kFloat: {
-        auto width = etype->AsFloat()->width();
-        switch (width) {
-        case 16:
-          return "short" + std::to_string(ecnt);
-        case 32:
-          return "int" + std::to_string(ecnt);
-        case 64:
-          return "long" + std::to_string(ecnt);
-        }
-        break;
-      }
-      default:
-        break;
-      }
-    }
+// The signed integer type of `width` bits.
+static std::string signed_int_type(unsigned width) {
+  switch (width) {
+  case 8:
+    return "char";
+  case 16:
+    return "short";
+  case 64:
+    return "long";
+  default:
+    return "int";
   }
+}
 
-  std::cerr << "UNIMPLEMENTED type for translation to boolean" << std::endl;
-  return "UNIMPLEMENTED TYPE FOR BOOLEAN";
+// The bit width of the elements of a vector type, as seen by vector relational
+// operations; 32 for bool vectors, which are intN masks.
+static unsigned element_width(const Type *vec) {
+  auto elem = vec->AsVector()->element_type();
+  switch (elem->kind()) {
+  case Type::Kind::kInteger:
+    return elem->AsInteger()->width();
+  case Type::Kind::kFloat:
+    return elem->AsFloat()->width();
+  default:
+    return 32;
+  }
+}
+
+std::string
+translator_impl::src_relational_mask(uint32_t operand,
+                                     const std::string &result) const {
+  auto type = type_for_val(operand);
+  if (type->kind() != Type::Kind::kVector || element_width(type) == 32) {
+    return result;
+  }
+  auto count = std::to_string(type->AsVector()->element_count());
+  return "convert_int" + count + "(" + result + ")";
+}
+
+std::string translator_impl::src_select_condition(uint32_t cond,
+                                                  uint32_t result_tyid) const {
+  auto result_type = type_for(result_tyid);
+  if (type_for_val(cond)->kind() != Type::Kind::kVector ||
+      element_width(result_type) == 32) {
+    return var_for(cond);
+  }
+  auto count = std::to_string(result_type->AsVector()->element_count());
+  return "convert_" + signed_int_type(element_width(result_type)) + count +
+         "(" + var_for(cond) + ")";
+}
+
+std::string translator_impl::src_vector_element_type(uint32_t tyid) const {
+  auto elem = type_for(tyid)->AsVector()->element_type();
+  if (elem->kind() == Type::Kind::kBool) {
+    return "int";
+  }
+  return src_type(type_id_for(elem));
 }
 
 bool translator_impl::get_null_constant(uint32_t tyid, std::string &src) const {

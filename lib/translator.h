@@ -146,12 +146,10 @@ private:
   // first request; later requests return the same name.
   const std::string &derived_name(uint32_t id, const std::string &suffix);
 
-  std::string src_var_decl(uint32_t tyid, const std::string &name,
-                           uint32_t val = 0) const;
+  std::string src_var_decl(uint32_t tyid, const std::string &name) const;
 
   std::string src_var_decl(uint32_t val) const {
-    auto tyid = type_id_for(val);
-    return src_var_decl(tyid, var_for(val), val);
+    return src_var_decl(type_id_for(val), var_for(val));
   }
 
   std::string src_access_chain(const std::string &src_base,
@@ -186,39 +184,62 @@ private:
     return "as_" + src_type_signed(varty) + "(" + var_for(val) + ")";
   }
 
-  std::string src_type_boolean_for_val(uint32_t val) const;
-
-  // Spell an operand of a logical op. A vector of OpTypeBool has no OpenCL C
-  // type ("boolN" is invalid), so re-spell a bool-vector *constant* operand at
-  // the result's signed-int vector width `booltype`. Other operands (scalars,
-  // and non-constant bool vectors already tracked in m_boolean_src_types) are
-  // returned unchanged.
-  std::string src_boolean_operand(uint32_t op,
-                                  const std::string &booltype) const;
-
+  // How SPIR-V types are represented in C. Most are the C type src_type
+  // spells, with two exceptions:
+  //  - OpenCL C forbids pointers inside structs and arrays, so a pointer stored
+  //    in one is an integer of pointer width there (src_storage_type), and is
+  //    converted on the way in and out (src_to_storage, src_from_storage).
+  //  - OpenCL C has no boolean vectors. A vector of OpTypeBool is an intN mask
+  //    with true as -1: what the vector relational and logical operators
+  //    produce and what select, any and all test (the sign bit). A scalar bool
+  //    is a C bool. Relational results are brought into this form by
+  //    src_relational_mask, and src_select_condition adapts a mask to the
+  //    width a vector select needs.
   std::string src_type(uint32_t id) const {
-    if (m_types.count(id)) {
-      return m_types.at(id);
-    } else {
-      return note_unsupported("type " + std::to_string(id));
+    auto it = m_type_info.find(id);
+    if (it != m_type_info.end()) {
+      return it->second.name;
     }
+    return note_unsupported("type " + std::to_string(id));
   }
 
-  std::string src_type_for_value(uint32_t idval) const {
-    if (m_boolean_src_types.count(idval)) {
-      return m_boolean_src_types.at(idval);
-    } else {
-      return src_type(type_id_for(idval));
-    }
-  }
-
+  // Integer types (and vectors of and pointers to them) are spelled unsigned;
+  // this is the signed spelling, for operations that interpret their operands
+  // as signed.
   std::string src_type_signed(uint32_t id) const {
-    if (m_types_signed.count(id)) {
-      return m_types_signed.at(id);
-    } else {
-      return note_unsupported("signed type " + std::to_string(id));
+    auto it = m_type_info.find(id);
+    if (it != m_type_info.end() && !it->second.signed_name.empty()) {
+      return it->second.signed_name;
     }
+    return note_unsupported("signed type " + std::to_string(id));
   }
+
+  bool has_signed_type(uint32_t id) const {
+    auto it = m_type_info.find(id);
+    return it != m_type_info.end() && !it->second.signed_name.empty();
+  }
+
+  // The integer type pointers are stored as (see above).
+  std::string src_pointer_int_type() const {
+    return m_pointer_width == 32 ? "uint" : "ulong";
+  }
+
+  std::string src_storage_type(uint32_t tyid) const;
+  std::string src_to_storage(uint32_t tyid, const std::string &value) const;
+  std::string src_from_storage(uint32_t tyid, const std::string &stored) const;
+
+  // `result` is the value of a relational builtin or operator applied to
+  // `operand`. For a vector operand it is a mask as wide as the operand's
+  // elements; narrow or widen it to the canonical intN.
+  std::string src_relational_mask(uint32_t operand,
+                                  const std::string &result) const;
+
+  // The condition of a select of `result_tyid` values: a vector select needs a
+  // mask as wide as the selected elements.
+  std::string src_select_condition(uint32_t cond, uint32_t result_tyid) const;
+
+  // The C type of the components of vector type `tyid`.
+  std::string src_vector_element_type(uint32_t tyid) const;
 
   std::string src_type_memory_object_declaration(uint32_t tid, uint32_t val,
                                                  const std::string &name) const;
@@ -369,21 +390,22 @@ private:
   // dereference doesn't, a cast through src_access_pointee otherwise.
   std::string src_dereference(uint32_t ptr, const MemoryAccess &access);
 
-  std::string src_aggregate_element_type(uint32_t tyid) const;
-
-  // Render a value being written into an aggregate leaf of SPIR-V type `tyid`.
-  // Pointer leaves are stored as integers (see src_aggregate_element_type), so
-  // a pointer value is cast to that integer type on the way in, mirroring the
-  // reconstruction in emit_access_chain.
-  std::string src_aggregate_element_value(uint32_t tyid, uint32_t object) const;
-
   // Render the member path selected by the literal indices of an
   // OpCompositeExtract/OpCompositeInsert (operands `first` onwards), starting
   // from a composite of type `tyid`, e.g. ".m1.e[2].s0". Sets `leaf_tyid` to
-  // the type of the selected member.
+  // the type of the selected member and `parent_tyid` to that of the
+  // composite holding it.
   bool src_composite_path(const spvtools::opt::Instruction &inst,
                           unsigned first, uint32_t tyid, std::string &path,
-                          uint32_t &leaf_tyid) const;
+                          uint32_t &leaf_tyid, uint32_t &parent_tyid) const;
+
+  // A value of type `elem_tyid` as a component of a composite of type
+  // `composite_tyid`, and back: pointers in aggregates are in storage form
+  // and booleans in vectors are mask elements (see src_type).
+  std::string src_to_component(uint32_t composite_tyid, uint32_t elem_tyid,
+                               const std::string &value) const;
+  std::string src_from_component(uint32_t composite_tyid, uint32_t elem_tyid,
+                                 const std::string &component) const;
 
   std::string builtin_vector_extract(uint32_t id, uint32_t idx,
                                      bool constant) const;
@@ -415,7 +437,7 @@ private:
   bool translate_capabilities();
   bool translate_extensions() const;
   bool translate_extended_instructions_imports() const;
-  bool translate_memory_model() const;
+  bool translate_memory_model();
   bool translate_entry_points();
   bool translate_execution_modes();
   bool translate_debug_instructions();
@@ -447,10 +469,7 @@ private:
     m_debug_names.clear();
     m_names.clear();
     m_derived_names.clear();
-    m_types.clear();
-    m_types_signed.clear();
-    m_pointee_aliases.clear();
-    m_pointee_aliases_signed.clear();
+    m_type_info.clear();
     m_underaligned_aliases.clear();
     m_literals.clear();
     m_entry_points.clear();
@@ -472,7 +491,6 @@ private:
     m_phi_vals.clear();
     m_phi_assigns.clear();
     m_sampled_images.clear();
-    m_boolean_src_types.clear();
     m_local_variable_decls.clear();
     m_constant_string_literals.clear();
     m_function_workgroup_params.clear();
@@ -493,11 +511,17 @@ private:
   // Every result id's C identifier (see assign_names).
   std::unordered_map<uint32_t, std::string> m_names;
   std::map<std::pair<uint32_t, std::string>, std::string> m_derived_names;
-  std::unordered_map<uint32_t, std::string> m_types;
-  std::unordered_map<uint32_t, std::string> m_types_signed;
-  // Pointee type id -> may_alias typedef name (see declare_pointee_alias).
-  std::unordered_map<uint32_t, std::string> m_pointee_aliases;
-  std::unordered_map<uint32_t, std::string> m_pointee_aliases_signed;
+  // Pointer width in bits, from the addressing model.
+  unsigned m_pointer_width = 64;
+  struct type_info {
+    std::string name;
+    std::string signed_name; // empty if the type has no signed variant
+    // The may_alias typedefs for pointers to the type (see
+    // declare_pointee_alias).
+    std::string alias;
+    std::string signed_alias;
+  };
+  std::unordered_map<uint32_t, type_info> m_type_info;
   // (pointee type id, alignment) -> reduced-alignment typedef name (see
   // underaligned_alias).
   std::map<std::pair<uint32_t, uint32_t>, std::string> m_underaligned_aliases;
@@ -526,8 +550,6 @@ private:
                      std::vector<std::pair<uint32_t, uint32_t>>>
       m_phi_assigns;
   std::unordered_map<uint32_t, std::pair<uint32_t, uint32_t>> m_sampled_images;
-  std::unordered_map<uint32_t, std::string>
-      m_boolean_src_types; // value, C type name
   std::unordered_map<uint32_t, std::string> m_local_variable_decls;
   std::unordered_map<uint32_t, std::string>
       m_constant_string_literals; // variable id -> string literal

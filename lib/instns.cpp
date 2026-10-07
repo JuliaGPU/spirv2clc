@@ -22,9 +22,10 @@ bool translator_impl::emit_access_chain(const Instruction &inst,
       // variant must go through integer arithmetic, which claims nothing.
       // Interior struct/array steps below still use typed lvalues: C cannot
       // express an out-of-bounds member walk, and producers don't emit them.
-      sval = "((" + src_type(type_id_for(base)) + ")((ulong)" + var_for(base) +
-             " + (ulong)(" + src_signed_index(elem) + ") * sizeof(*" +
-             var_for(base) + ")))";
+      auto intptr = src_pointer_int_type();
+      sval = "((" + src_type(type_id_for(base)) + ")((" + intptr + ")" +
+             var_for(base) + " + (" + intptr + ")(" + src_signed_index(elem) +
+             ") * sizeof(*" + var_for(base) + ")))";
     }
     i = 4;
   } else {
@@ -60,10 +61,10 @@ bool translator_impl::emit_access_chain(const Instruction &inst,
     }
   }
   // If the chain descended through an aggregate to land on a pointer slot, that
-  // slot was encoded as an integer (see src_aggregate_element_type). Cast the
-  // address back to the real pointer type so the subsequent load/store of the
-  // reconstructed pointer type-checks; the bit pattern is preserved under
-  // Physical64 where pointers are pointer-width integers.
+  // slot holds the pointer in storage form (see src_storage_type). Reinterpret
+  // the slot's address as the address of a pointer, which the storage form
+  // has the size and bit pattern of, so loads and stores through it see the
+  // pointer.
   if (descended_aggregate && cty->kind() == Type::Kind::kPointer) {
     sval = "(" + src_type(inst.type_id()) + ")(" + sval + ")";
   }
@@ -141,8 +142,6 @@ bool translator_impl::translate_instruction(const Instruction &inst,
 
   std::string sval;
   bool assign_result = true;
-  bool boolean_result = false;
-  std::string boolean_result_src_type;
 
   switch (opcode) {
   case spv::Op::OpUndef: {
@@ -547,16 +546,12 @@ bool translator_impl::translate_instruction(const Instruction &inst,
       break;
     }
     std::string path;
-    uint32_t leaf_tyid;
-    if (!src_composite_path(inst, 3, type_id_for(comp), path, leaf_tyid)) {
+    uint32_t leaf_tyid, parent_tyid;
+    if (!src_composite_path(inst, 3, type_id_for(comp), path, leaf_tyid,
+                            parent_tyid)) {
       return false;
     }
-    sval = var_for(comp) + path;
-    // Pointer leaves are stored as integers (see src_aggregate_element_type),
-    // so turn them back into the pointer type on the way out.
-    if (type_for(leaf_tyid)->kind() == Type::Kind::kPointer) {
-      sval = src_cast(rtype, sval);
-    }
+    sval = src_from_component(parent_tyid, leaf_tyid, var_for(comp) + path);
     break;
   }
   case spv::Op::OpCompositeInsert: {
@@ -564,8 +559,8 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     auto composite = inst.GetSingleWordOperand(3);
 
     std::string path;
-    uint32_t leaf_tyid;
-    if (!src_composite_path(inst, 4, rtype, path, leaf_tyid)) {
+    uint32_t leaf_tyid, parent_tyid;
+    if (!src_composite_path(inst, 4, rtype, path, leaf_tyid, parent_tyid)) {
       return false;
     }
 
@@ -573,31 +568,19 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     src = src_type(rtype) + " " + var_for(result) + " = " + var_for(composite) +
           "; ";
     src += var_for(result) + path + " = " +
-           src_aggregate_element_value(leaf_tyid, object);
+           src_to_component(parent_tyid, leaf_tyid, var_for(object));
     break;
   }
   case spv::Op::OpCompositeConstruct: {
     // Arrays are struct-wrapped, so their elements live in the 'e' member and
     // need an extra brace level: { { e0, e1, ... } }.
-    auto type = type_for(rtype);
-    bool is_array = type->kind() == Type::Kind::kArray;
-    bool is_struct = type->kind() == Type::Kind::kStruct;
+    bool is_array = type_for(rtype)->kind() == Type::Kind::kArray;
     sval = is_array ? "{{" : "{";
     const char *sep = "";
     for (unsigned i = 2; i < inst.NumOperands(); i++) {
       auto mem = inst.GetSingleWordOperand(i);
       sval += sep;
-      // Pointer leaves are integer-encoded, so cast a pointer member to the
-      // leaf's type (see src_aggregate_element_value).
-      if (is_array) {
-        sval += src_aggregate_element_value(
-            type_id_for(type->AsArray()->element_type()), mem);
-      } else if (is_struct) {
-        sval += src_aggregate_element_value(
-            type_id_for(type->AsStruct()->element_types()[i - 2]), mem);
-      } else {
-        sval += var_for(mem);
-      }
+      sval += src_to_component(rtype, type_id_for(mem), var_for(mem));
       sep = ", ";
     }
     sval += is_array ? "}}" : "}";
@@ -610,20 +593,20 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     if (m_builtin_values.count(vec)) {
       sval = builtin_vector_extract(vec, idx, false);
     } else {
-      sval = "((" + src_type(rtype) + "*)&" + var_for(vec) + ")[" + var_for(idx) +
-           "]";
+      sval = "((" + src_vector_element_type(type_id_for(vec)) + "*)&" +
+             var_for(vec) + ")[" + var_for(idx) + "]";
     }
     break;
   }
   case spv::Op::OpVectorInsertDynamic: {
     auto vec = inst.GetSingleWordOperand(2);
     auto comp = inst.GetSingleWordOperand(3);
-    auto comp_type_id = type_id_for(comp);
     auto idx = inst.GetSingleWordOperand(4);
     sval = var_for(vec);
     sval += "; ";
-    sval += "((" + src_type(comp_type_id) + "*)&" + var_for(result) + ")[" +
-            var_for(idx) + "] = " + var_for(comp);
+    sval += "((" + src_vector_element_type(rtype) + "*)&" + var_for(result) +
+            ")[" + var_for(idx) +
+            "] = " + src_to_component(rtype, type_id_for(comp), var_for(comp));
     break;
   }
   case spv::Op::OpVectorShuffle: {
@@ -708,9 +691,8 @@ bool translator_impl::translate_instruction(const Instruction &inst,
   case spv::Op::OpLessOrGreater: {
     auto op1 = inst.GetSingleWordOperand(2);
     auto op2 = inst.GetSingleWordOperand(3);
-    boolean_result = true;
-    boolean_result_src_type = src_type_boolean_for_val(op1);
-    sval = src_function_call("islessgreater", op1, op2);
+    sval =
+        src_relational_mask(op1, src_function_call("islessgreater", op1, op2));
     break;
   }
   // Unordered float comparisons (OpFUnord*) are true when either operand is
@@ -727,8 +709,6 @@ bool translator_impl::translate_instruction(const Instruction &inst,
   case spv::Op::OpFUnordGreaterThanEqual: {
     auto op1 = inst.GetSingleWordOperand(2);
     auto op2 = inst.GetSingleWordOperand(3);
-    boolean_result = true;
-    boolean_result_src_type = src_type_boolean_for_val(op1);
     const char *ordered = nullptr;
     switch (opcode) {
     case spv::Op::OpFOrdNotEqual:
@@ -759,6 +739,7 @@ bool translator_impl::translate_instruction(const Instruction &inst,
       sval = src_function_call("isunordered", op1, op2) + " | " +
              src_function_call(ordered, op1, op2);
     }
+    sval = src_relational_mask(op1, sval);
     break;
   }
   case spv::Op::OpFOrdEqual:
@@ -780,9 +761,7 @@ bool translator_impl::translate_instruction(const Instruction &inst,
   case spv::Op::OpPtrEqual:
   case spv::Op::OpPtrNotEqual: {
     auto op1 = inst.GetSingleWordOperand(2);
-    boolean_result = true;
-    boolean_result_src_type = src_type_boolean_for_val(op1);
-    sval = translate_binop(inst);
+    sval = src_relational_mask(op1, translate_binop(inst));
     break;
   }
   case spv::Op::OpSLessThanEqual:
@@ -790,9 +769,7 @@ bool translator_impl::translate_instruction(const Instruction &inst,
   case spv::Op::OpSGreaterThanEqual:
   case spv::Op::OpSLessThan: {
     auto op1 = inst.GetSingleWordOperand(2);
-    boolean_result = true;
-    boolean_result_src_type = src_type_boolean_for_val(op1);
-    sval = translate_binop_signed(inst);
+    sval = src_relational_mask(op1, translate_binop_signed(inst));
     break;
   }
   case spv::Op::OpAny: {
@@ -807,27 +784,27 @@ bool translator_impl::translate_instruction(const Instruction &inst,
   }
   case spv::Op::OpIsNan: {
     auto val = inst.GetSingleWordOperand(2);
-    sval = src_function_call("isnan", val);
+    sval = src_relational_mask(val, src_function_call("isnan", val));
     break;
   }
   case spv::Op::OpIsInf: {
     auto val = inst.GetSingleWordOperand(2);
-    sval = src_function_call("isinf", val);
+    sval = src_relational_mask(val, src_function_call("isinf", val));
     break;
   }
   case spv::Op::OpIsFinite: {
     auto val = inst.GetSingleWordOperand(2);
-    sval = src_function_call("isfinite", val);
+    sval = src_relational_mask(val, src_function_call("isfinite", val));
     break;
   }
   case spv::Op::OpIsNormal: {
     auto val = inst.GetSingleWordOperand(2);
-    sval = src_function_call("isnormal", val);
+    sval = src_relational_mask(val, src_function_call("isnormal", val));
     break;
   }
   case spv::Op::OpSignBitSet: {
     auto val = inst.GetSingleWordOperand(2);
-    sval = src_function_call("signbit", val);
+    sval = src_relational_mask(val, src_function_call("signbit", val));
     break;
   }
   case spv::Op::OpBitCount: {
@@ -838,13 +815,13 @@ bool translator_impl::translate_instruction(const Instruction &inst,
   case spv::Op::OpOrdered: {
     auto x = inst.GetSingleWordOperand(2);
     auto y = inst.GetSingleWordOperand(3);
-    sval = src_function_call("isordered", x, y);
+    sval = src_relational_mask(x, src_function_call("isordered", x, y));
     break;
   }
   case spv::Op::OpUnordered: {
     auto x = inst.GetSingleWordOperand(2);
     auto y = inst.GetSingleWordOperand(3);
-    sval = src_function_call("isunordered", x, y);
+    sval = src_relational_mask(x, src_function_call("isunordered", x, y));
     break;
   }
   case spv::Op::OpConvertFToU:
@@ -957,8 +934,8 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     auto cond = inst.GetSingleWordOperand(2);
     auto val_true = inst.GetSingleWordOperand(3);
     auto val_false = inst.GetSingleWordOperand(4);
-    sval =
-        var_for(cond) + " ? " + var_for(val_true) + " : " + var_for(val_false);
+    sval = src_select_condition(cond, rtype) + " ? " + var_for(val_true) +
+           " : " + var_for(val_false);
     break;
   }
   case spv::Op::OpBranch: {
@@ -1151,40 +1128,12 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     return false;
   }
 
-  if (boolean_result) {
-    m_boolean_src_types[result] = boolean_result_src_type;
-  }
-
   if ((result != 0) && assign_result) {
     src = src_var_decl(result);
     src += " = " + sval;
   }
 
   return true;
-}
-
-std::string
-translator_impl::src_boolean_operand(uint32_t op,
-                                     const std::string &booltype) const {
-  auto type = type_for_val(op);
-  if (type->kind() == Type::Kind::kVector &&
-      type->AsVector()->element_type()->kind() == Type::Kind::kBool) {
-    auto def = m_ir->get_def_use_mgr()->GetDef(op);
-    if (def && def->opcode() == spv::Op::OpConstantNull) {
-      return "((" + booltype + ")(0))";
-    }
-    if (def && def->opcode() == spv::Op::OpConstantComposite) {
-      std::string s = "((" + booltype + ")(";
-      const char *sep = "";
-      for (uint32_t i = 0; i < def->NumInOperands(); i++) {
-        s += sep;
-        s += var_for(def->GetSingleWordInOperand(i)); // "true" / "false"
-        sep = ", ";
-      }
-      return s + "))";
-    }
-  }
-  return var_for(op);
 }
 
 std::string translator_impl::translate_binop(const Instruction &inst) const {
@@ -1232,30 +1181,6 @@ std::string translator_impl::translate_binop(const Instruction &inst) const {
   auto v2 = inst.GetSingleWordOperand(3);
 
   auto &srcop = binops.at(inst.opcode());
-
-  switch (inst.opcode()) {
-  case spv::Op::OpLogicalAnd:
-  case spv::Op::OpLogicalOr:
-  case spv::Op::OpLogicalEqual:
-  case spv::Op::OpLogicalNotEqual: {
-    // Bool-vector constant operands have no OpenCL C type; re-spell them at the
-    // signed-int vector width of the other operand. The non-constant operand is
-    // a comparison/logical result, so its width is recorded in
-    // m_boolean_src_types (a bool-vector constant is not).
-    std::string bt;
-    if (m_boolean_src_types.count(v1)) {
-      bt = m_boolean_src_types.at(v1);
-    } else if (m_boolean_src_types.count(v2)) {
-      bt = m_boolean_src_types.at(v2);
-    } else {
-      bt = src_type_boolean_for_val(v1);
-    }
-    return src_boolean_operand(v1, bt) + " " + srcop + " " +
-           src_boolean_operand(v2, bt);
-  }
-  default:
-    break;
-  }
 
   return var_for(v1) + " " + srcop + " " + var_for(v2);
 }
