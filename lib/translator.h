@@ -266,10 +266,19 @@ private:
   // ("add", "inc", ...) from the atomic pointer's pointee width.
   std::string atomic_builtin(const std::string &op, uint32_t ptr) const;
 
-  // C11 atomic pointer reinterpretation for atomic load/store (OpenCL C 2.0+),
-  // e.g. "(volatile global atomic_uint*)v12". Picks atomic_int/uint/long/
-  // ulong/float/double from the pointee type.
-  c::expr_ref atomic_c11_pointer(uint32_t ptr) const;
+  // `ptr` reinterpreted as a pointer to the C11 atomic type the OpenCL C 2.0
+  // atomics operate on, e.g. "(volatile global atomic_uint*)v12". Integers are
+  // atomic_uint/ulong, or atomic_int/long for `is_signed`, which selects the
+  // signed comparison of atomic_fetch_min/max.
+  c::expr_ref atomic_c11_pointer(uint32_t ptr, bool is_signed = false) const;
+
+  // The value of the constant Scope or Memory Semantics operand `id`, or
+  // nothing (after reporting) if it is computed at run time.
+  std::optional<uint32_t> constant_operand(uint32_t id, const char *what) const;
+
+  // The OpenCL C 2.0 memory_scope for a SPIR-V Scope, or null (after
+  // reporting) for one OpenCL C has no counterpart for.
+  c::expr_ref memory_scope(uint32_t scope) const;
 
   // The CLK_*_MEM_FENCE flags for a SPIR-V memory-semantics mask (0 if no
   // memory class is set). Shared by the barrier and fence instructions.

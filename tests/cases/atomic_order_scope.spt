@@ -1,0 +1,79 @@
+; From OpenCL C 2.0 on, atomics lower to the C11 *_explicit builtins with the
+; memory order and scope of their Memory Semantics and Scope operands. The
+; semantics are those GPUCompiler emits: an order bit with Subgroup, Workgroup
+; and CrossWorkgroup memory (0x380), e.g. 0x388 = 904 for acq_rel. Orders
+; OpenCL C rejects are clamped: a load doesn't release, a store doesn't acquire,
+; and a compare-exchange succeeds at least as strongly as it fails.
+; Scopes below a work-group widen to it. The OpenCL C 1.x atomics are relaxed,
+; so ordered atomics fail to translate there.
+; RUN: not %spirv2clc --asm --spirv-version=1.4 --cl-std=CL1.2 %s 2>&1 | %FileCheck %s --check-prefix=CL12
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL2.0 %s | %FileCheck %s
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL2.0 %s | %clang -c -cl-std=CL2.0 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL3.0 %s | %clang -c -cl-std=CL3.0 -x cl - -o /dev/null
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Int64
+               OpCapability Int64Atomics
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+      %ulong = OpTypeInt 64 0
+         %pg = OpTypePointer CrossWorkgroup %uint
+        %pgl = OpTypePointer CrossWorkgroup %ulong
+         %pl = OpTypePointer Workgroup %uint
+%crossdevice = OpConstant %uint 0
+     %device = OpConstant %uint 1
+  %workgroup = OpConstant %uint 2
+   %subgroup = OpConstant %uint 3
+ %invocation = OpConstant %uint 4
+    %relaxed = OpConstant %uint 896
+    %acquire = OpConstant %uint 898
+    %release = OpConstant %uint 900
+     %acqrel = OpConstant %uint 904
+     %seqcst = OpConstant %uint 912
+        %two = OpConstant %uint 2
+       %twol = OpConstant %ulong 2
+       %fnty = OpTypeFunction %void %pg %pgl %pl
+          %k = OpFunction %void None %fnty
+          %p = OpFunctionParameter %pg
+         %pw = OpFunctionParameter %pgl
+         %pl_ = OpFunctionParameter %pl
+         %bb = OpLabel
+       %add = OpAtomicIAdd %uint %p %device %acqrel %two
+       %sub = OpAtomicISub %uint %p %crossdevice %relaxed %two
+      %smin = OpAtomicSMin %uint %p %workgroup %seqcst %two
+      %umax = OpAtomicUMax %uint %pl_ %subgroup %acquire %two
+       %inc = OpAtomicIIncrement %uint %p %invocation %release
+       %dec = OpAtomicIDecrement %uint %p %device %relaxed
+      %xchg = OpAtomicExchange %uint %p %device %seqcst %two
+      %addl = OpAtomicIAdd %ulong %pw %device %acqrel %twol
+       %cx1 = OpAtomicCompareExchange %uint %p %device %acqrel %acquire %two %add
+       %cx2 = OpAtomicCompareExchange %uint %p %device %relaxed %seqcst %two %add
+       %cx3 = OpAtomicCompareExchange %uint %p %device %release %acquire %two %add
+       %ld1 = OpAtomicLoad %uint %p %device %acqrel
+       %ld2 = OpAtomicLoad %uint %p %device %release
+              OpAtomicStore %p %device %acqrel %ld1
+              OpAtomicStore %p %device %acquire %ld2
+              OpReturn
+              OpFunctionEnd
+; CL12: UNIMPLEMENTED: ordered atomics require OpenCL C 2.0 (targeting 1.2).
+; CHECK: [[P:v[0-9]+]], {{.*}} global* [[PW:v[0-9]+]], {{.*}} local* [[PL:v[0-9]+]])
+; CHECK: [[ADD:v[0-9]+]] = atomic_fetch_add_explicit((volatile global atomic_uint*)[[P]], (uint)2, memory_order_acq_rel, memory_scope_device);
+; CHECK: = atomic_fetch_sub_explicit((volatile global atomic_uint*)[[P]], (uint)2, memory_order_relaxed, memory_scope_all_svm_devices);
+; CHECK: = as_uint(atomic_fetch_min_explicit((volatile global atomic_int*)[[P]], as_int((uint)2), memory_order_seq_cst, memory_scope_work_group));
+; CHECK: = atomic_fetch_max_explicit((volatile local atomic_uint*)[[PL]], (uint)2, memory_order_acquire, memory_scope_work_group);
+; CHECK: = atomic_fetch_add_explicit((volatile global atomic_uint*)[[P]], (uint)1, memory_order_release, memory_scope_work_group);
+; CHECK: = atomic_fetch_sub_explicit((volatile global atomic_uint*)[[P]], (uint)1, memory_order_relaxed, memory_scope_device);
+; CHECK: = atomic_exchange_explicit((volatile global atomic_uint*)[[P]], (uint)2, memory_order_seq_cst, memory_scope_device);
+; CHECK: = atomic_fetch_add_explicit((volatile global atomic_ulong*)[[PW]], (ulong)2, memory_order_acq_rel, memory_scope_device);
+; CHECK: uint [[CX1:v[0-9]+]] = [[ADD]];
+; CHECK-NEXT: atomic_compare_exchange_strong_explicit((volatile global atomic_uint*)[[P]], &[[CX1]], (uint)2, memory_order_acq_rel, memory_order_acquire, memory_scope_device);
+; CHECK: uint [[CX2:v[0-9]+]] = [[ADD]];
+; CHECK-NEXT: atomic_compare_exchange_strong_explicit((volatile global atomic_uint*)[[P]], &[[CX2]], (uint)2, memory_order_seq_cst, memory_order_seq_cst, memory_scope_device);
+; CHECK: uint [[CX3:v[0-9]+]] = [[ADD]];
+; CHECK-NEXT: atomic_compare_exchange_strong_explicit((volatile global atomic_uint*)[[P]], &[[CX3]], (uint)2, memory_order_acq_rel, memory_order_acquire, memory_scope_device);
+; CHECK: [[LD1:v[0-9]+]] = atomic_load_explicit((volatile global atomic_uint*)[[P]], memory_order_acquire, memory_scope_device);
+; CHECK: [[LD2:v[0-9]+]] = atomic_load_explicit((volatile global atomic_uint*)[[P]], memory_order_relaxed, memory_scope_device);
+; CHECK: atomic_store_explicit((volatile global atomic_uint*)[[P]], [[LD1]], memory_order_release, memory_scope_device);
+; CHECK: atomic_store_explicit((volatile global atomic_uint*)[[P]], [[LD2]], memory_order_relaxed, memory_scope_device);
