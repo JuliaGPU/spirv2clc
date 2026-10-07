@@ -193,6 +193,22 @@ memory_order without_acquire(memory_order order) {
   }
 }
 
+// How many work-items a scope spans, relative to the others.
+int scope_width(uint32_t scope) {
+  switch (scope) {
+  case SpvScopeInvocation:
+    return 0;
+  case SpvScopeSubgroup:
+    return 1;
+  case SpvScopeWorkgroup:
+    return 2;
+  case SpvScopeDevice:
+    return 3;
+  default: // CrossDevice, and scopes OpenCL C doesn't know
+    return 4;
+  }
+}
+
 // The weakest order at least as strong as both `a` and `b`.
 memory_order join(memory_order a, memory_order b) {
   if (a == b || b == memory_order::relaxed) {
@@ -1061,69 +1077,116 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     break;
   }
   case spv::Op::OpControlBarrier: {
-    auto execution_scope = inst.GetSingleWordOperand(0);
-    auto memory_scope = inst.GetSingleWordOperand(1);
-    auto memory_semantics = inst.GetSingleWordOperand(2);
-
-    auto cstmgr = m_ir->get_constant_mgr();
-
-    auto exec_scope_cst = cstmgr->FindDeclaredConstant(execution_scope);
-    if (exec_scope_cst == nullptr) {
-      std::cerr
-          << "UNIMPLEMENTED OpControlBarrier with non-constant execution scope"
-          << std::endl;
+    auto exec_scope = constant_operand(inst.GetSingleWordOperand(0),
+                                       "OpControlBarrier execution scope");
+    auto mem_scope = constant_operand(inst.GetSingleWordOperand(1),
+                                      "OpControlBarrier memory scope");
+    auto mem_sem = constant_operand(inst.GetSingleWordOperand(2),
+                                    "OpControlBarrier memory semantics");
+    if (!exec_scope || !mem_scope || !mem_sem) {
       return false;
     }
 
     // The execution scope selects the barrier: work-group (barrier) vs
     // sub-group (sub_group_barrier, cl_khr_subgroups).
-    auto exec_scope = exec_scope_cst->GetU32();
-    const char *barrier_fn;
-    if (exec_scope == SpvScopeWorkgroup) {
-      barrier_fn = "barrier";
-    } else if (exec_scope == SpvScopeSubgroup) {
-      barrier_fn = "sub_group_barrier";
+    bool work_group;
+    if (*exec_scope == SpvScopeWorkgroup) {
+      work_group = true;
+    } else if (*exec_scope == SpvScopeSubgroup) {
+      work_group = false;
     } else {
       std::cerr << "UNIMPLEMENTED OpControlBarrier execution scope "
-                << exec_scope << std::endl;
-      return false;
-    }
-
-    auto mem_scope_cst = cstmgr->FindDeclaredConstant(memory_scope);
-    if (mem_scope_cst == nullptr) {
-      std::cerr
-          << "UNIMPLEMENTED OpControlBarrier with non-constant memory scope"
-          << std::endl;
-      return false;
-    }
-
-    auto mem_sem_cst = cstmgr->FindDeclaredConstant(memory_semantics);
-    if (mem_sem_cst == nullptr) {
-      std::cerr
-          << "UNIMPLEMENTED OpControlBarrier with non-constant memory semantics"
-          << std::endl;
+                << *exec_scope << std::endl;
       return false;
     }
 
     // The fence flags come from the memory semantics (Workgroup memory -> local
-    // fence, CrossWorkgroup memory -> global fence), not the memory scope.
-    fb.expression(c::call(barrier_fn, {fence_flags(mem_sem_cst->GetU32())}));
+    // fence, CrossWorkgroup memory -> global fence). The barrier fences memory
+    // at its own scope unless given a wider one, which takes OpenCL C 2.0.
+    if (scope_width(*mem_scope) <= scope_width(*exec_scope)) {
+      fb.expression(c::call(work_group ? "barrier" : "sub_group_barrier",
+                            {fence_flags(*mem_sem)}));
+      break;
+    }
+    if (m_opencl_c_version < 200) {
+      std::cerr << "UNIMPLEMENTED: barriers fencing beyond the work-group "
+                   "require OpenCL C 2.0 (targeting "
+                << opencl_c_version_str(m_opencl_c_version) << ").\n";
+      return false;
+    }
+    auto scope_arg = memory_scope(*mem_scope);
+    if (!scope_arg) {
+      return false;
+    }
+    // work_group_barrier only fences image memory at the scope of the
+    // work-group, so that takes a barrier of its own. Only accesses to
+    // read-write images need it.
+    auto mem_sem_scoped = *mem_sem;
+    if (work_group) {
+      mem_sem_scoped &= ~SpvMemorySemanticsImageMemoryMask;
+      if ((*mem_sem & SpvMemorySemanticsImageMemoryMask) &&
+          m_read_write_images) {
+        fb.expression(c::call(
+            "barrier", {fence_flags(SpvMemorySemanticsImageMemoryMask)}));
+      }
+    }
+    fb.expression(
+        c::call(work_group ? "work_group_barrier" : "sub_group_barrier",
+                {fence_flags(mem_sem_scoped), scope_arg}));
     break;
   }
   case spv::Op::OpMemoryBarrier: {
-    // Standalone fence: operands <Memory scope> <Memory Semantics>. Map to
-    // mem_fence with the corresponding CLK_*_MEM_FENCE flags.
-    auto memory_semantics = inst.GetSingleWordOperand(1);
-    auto mem_sem_cst =
-        m_ir->get_constant_mgr()->FindDeclaredConstant(memory_semantics);
-    if (mem_sem_cst == nullptr) {
-      std::cerr
-          << "UNIMPLEMENTED OpMemoryBarrier with non-constant memory semantics"
-          << std::endl;
+    auto scope = constant_operand(inst.GetSingleWordOperand(0),
+                                  "OpMemoryBarrier memory scope");
+    auto mem_sem = constant_operand(inst.GetSingleWordOperand(1),
+                                    "OpMemoryBarrier memory semantics");
+    if (!scope || !mem_sem) {
       return false;
     }
     assign_result = false;
-    fb.expression(c::call("mem_fence", {fence_flags(mem_sem_cst->GetU32())}));
+    auto order = order_of(*mem_sem);
+    // A relaxed fence orders nothing.
+    if (order == memory_order::relaxed) {
+      break;
+    }
+    // mem_fence orders memory within the work-group.
+    if (m_opencl_c_version < 200) {
+      if (scope_width(*scope) > scope_width(SpvScopeWorkgroup)) {
+        std::cerr << "UNIMPLEMENTED: fences beyond the work-group require "
+                     "OpenCL C 2.0 (targeting "
+                  << opencl_c_version_str(m_opencl_c_version) << ").\n";
+        return false;
+      }
+      fb.expression(c::call("mem_fence", {fence_flags(*mem_sem)}));
+      break;
+    }
+    auto scope_arg = memory_scope(*scope);
+    if (!scope_arg) {
+      return false;
+    }
+    // OpenCL C only fences image memory within a work-item (across work-items
+    // that takes a barrier), with its own fence. That orders accesses to
+    // read-write images, and devices without them reject the fence.
+    bool image_fence = (*mem_sem & SpvMemorySemanticsImageMemoryMask) &&
+                       *scope == SpvScopeInvocation && m_read_write_images;
+    if (image_fence) {
+      fb.expression(c::call("atomic_work_item_fence",
+                            {c::name("CLK_IMAGE_MEM_FENCE"),
+                             c::name("memory_order_acq_rel"),
+                             c::name("memory_scope_work_item")}));
+    }
+    // Flags naming no memory are undefined behavior in atomic_work_item_fence,
+    // so fence all memory instead.
+    auto memory = *mem_sem & (SpvMemorySemanticsWorkgroupMemoryMask |
+                              SpvMemorySemanticsCrossWorkgroupMemoryMask);
+    if (memory == 0 && !image_fence) {
+      memory = SpvMemorySemanticsWorkgroupMemoryMask |
+               SpvMemorySemanticsCrossWorkgroupMemoryMask;
+    }
+    if (memory != 0) {
+      fb.expression(c::call("atomic_work_item_fence",
+                            {fence_flags(memory), spell(order), scope_arg}));
+    }
     break;
   }
   case spv::Op::OpGroupNonUniformShuffle:

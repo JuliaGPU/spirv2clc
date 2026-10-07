@@ -413,6 +413,7 @@ private:
 
   void reset() {
     m_translation_failed = false;
+    m_read_write_images = false;
     m_out = output();
     m_name_allocator = name_allocator();
     m_debug_names.clear();
@@ -460,6 +461,9 @@ private:
   std::map<std::pair<uint32_t, std::string>, std::string> m_derived_names;
   // Pointer width in bits, from the addressing model.
   unsigned m_pointer_width = 64;
+  // Whether the module declares read-write images, the only ones a work-item
+  // can need to fence its own accesses to.
+  bool m_read_write_images = false;
   struct type_info {
     std::string name;
     std::string signed_name; // empty if the type has no signed variant
