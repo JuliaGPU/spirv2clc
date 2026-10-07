@@ -1,6 +1,7 @@
 
-bool translator::emit_access_chain(const Instruction &inst, bool ptr_variant,
-                                   std::string &sval) const {
+bool translator_impl::emit_access_chain(const Instruction &inst,
+                                        bool ptr_variant,
+                                        std::string &sval) const {
   auto base = inst.GetSingleWordOperand(2);
   const Type *cty = type_for_val(base)->AsPointer()->pointee_type();
   unsigned i;
@@ -69,8 +70,8 @@ bool translator::emit_access_chain(const Instruction &inst, bool ptr_variant,
   return true;
 }
 
-std::string translator::atomic_builtin(const std::string &op,
-                                       uint32_t ptr) const {
+std::string translator_impl::atomic_builtin(const std::string &op,
+                                            uint32_t ptr) const {
   auto pointee = type_for_val(ptr)->AsPointer()->pointee_type();
   bool is64 = pointee->kind() == Type::Kind::kInteger &&
               pointee->AsInteger()->width() == 64;
@@ -78,7 +79,7 @@ std::string translator::atomic_builtin(const std::string &op,
   return (is64 ? "atom_" : "atomic_") + op;
 }
 
-std::string translator::atomic_c11_pointer(uint32_t ptr) const {
+std::string translator_impl::atomic_c11_pointer(uint32_t ptr) const {
   auto ptrty = type_for_val(ptr)->AsPointer();
   auto pointee = ptrty->pointee_type();
   std::string ty;
@@ -96,7 +97,7 @@ std::string translator::atomic_c11_pointer(uint32_t ptr) const {
          var_for(ptr) + ")";
 }
 
-std::string translator::fence_flags(uint32_t mem_sem) const {
+std::string translator_impl::fence_flags(uint32_t mem_sem) const {
   std::string flags;
   auto add = [&](const char *f) {
     flags += flags.empty() ? "" : " | ";
@@ -117,8 +118,8 @@ std::string translator::fence_flags(uint32_t mem_sem) const {
   return flags.empty() ? "0" : flags;
 }
 
-std::string translator::src_dereference(uint32_t ptr,
-                                        const MemoryAccess &access) const {
+std::string translator_impl::src_dereference(uint32_t ptr,
+                                             const MemoryAccess &access) const {
   auto ptrty = type_for_val(ptr)->AsPointer();
   auto pointee = m_ir->get_type_mgr()->GetId(ptrty->pointee_type());
   bool vol = access.mask & SpvMemoryAccessVolatileMask;
@@ -132,8 +133,8 @@ std::string translator::src_dereference(uint32_t ptr,
          ")";
 }
 
-bool translator::translate_instruction(const Instruction &inst,
-                                       std::string &src) {
+bool translator_impl::translate_instruction(const Instruction &inst,
+                                            std::string &src) {
   auto opcode = inst.opcode();
   auto rtype = inst.type_id();
   auto result = inst.result_id();
@@ -1159,8 +1160,9 @@ bool translator::translate_instruction(const Instruction &inst,
   return true;
 }
 
-std::string translator::src_boolean_operand(uint32_t op,
-                                            const std::string &booltype) const {
+std::string
+translator_impl::src_boolean_operand(uint32_t op,
+                                     const std::string &booltype) const {
   auto type = type_for_val(op);
   if (type->kind() == Type::Kind::kVector &&
       type->AsVector()->element_type()->kind() == Type::Kind::kBool) {
@@ -1182,7 +1184,7 @@ std::string translator::src_boolean_operand(uint32_t op,
   return var_for(op);
 }
 
-std::string translator::translate_binop(const Instruction &inst) const {
+std::string translator_impl::translate_binop(const Instruction &inst) const {
   static std::unordered_map<spv::Op, const std::string> binops = {
       {spv::Op::OpFMul, "*"},
       {spv::Op::OpFDiv, "/"},
@@ -1255,7 +1257,8 @@ std::string translator::translate_binop(const Instruction &inst) const {
   return var_for(v1) + " " + srcop + " " + var_for(v2);
 }
 
-std::string translator::translate_binop_signed(const Instruction &inst) const {
+std::string
+translator_impl::translate_binop_signed(const Instruction &inst) const {
   static std::unordered_map<spv::Op, const std::string> binops = {
       {spv::Op::OpSDiv, "/"},
       {spv::Op::OpSRem, "%"},
@@ -1274,7 +1277,8 @@ std::string translator::translate_binop_signed(const Instruction &inst) const {
   return src_as_signed(v1) + " " + srcop + " " + src_as_signed(v2);
 }
 
-std::string translator::builtin_vector_extract(uint32_t id, uint32_t idx, bool constant) const {
+std::string translator_impl::builtin_vector_extract(uint32_t id, uint32_t idx,
+                                                    bool constant) const {
   std::string arg;
   if (constant) {
     arg = std::to_string(idx);
@@ -1303,7 +1307,7 @@ std::string translator::builtin_vector_extract(uint32_t id, uint32_t idx, bool c
   }
 }
 
-std::string translator::builtin_vector(uint32_t id) const {
+std::string translator_impl::builtin_vector(uint32_t id) const {
   auto type = type_for_val(id);
   auto vec = type ? type->AsVector() : nullptr;
   if (!vec) {

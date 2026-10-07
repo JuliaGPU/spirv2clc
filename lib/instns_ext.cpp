@@ -20,7 +20,7 @@ static std::unordered_map<OpenCLLIB::Entrypoints,
 };
 
 std::string
-translator::translate_extended_ternary(const Instruction &inst) const {
+translator_impl::translate_extended_ternary(const Instruction &inst) const {
   auto rtype = inst.type_id();
   auto extinst =
       static_cast<OpenCLLIB::Entrypoints>(inst.GetSingleWordOperand(3));
@@ -89,7 +89,7 @@ static std::unordered_map<OpenCLLIB::Entrypoints,
 };
 
 std::string
-translator::translate_extended_binary(const Instruction &inst) const {
+translator_impl::translate_extended_binary(const Instruction &inst) const {
   auto rtype = inst.type_id();
   auto extinst =
       static_cast<OpenCLLIB::Entrypoints>(inst.GetSingleWordOperand(3));
@@ -179,15 +179,15 @@ static std::unordered_map<OpenCLLIB::Entrypoints, const std::string>
 };
 
 std::string
-translator::translate_extended_unary(const Instruction &inst) const {
+translator_impl::translate_extended_unary(const Instruction &inst) const {
   auto extinst =
       static_cast<OpenCLLIB::Entrypoints>(inst.GetSingleWordOperand(3));
   auto val = inst.GetSingleWordOperand(4);
   return src_function_call(gExtendedInstructionsUnary.at(extinst), val);
 }
 
-bool translator::translate_extended_instruction(const Instruction &inst,
-                                                std::string &src) {
+bool translator_impl::translate_extended_instruction(const Instruction &inst,
+                                                     std::string &src) {
   auto result = inst.result_id();
   auto instruction =
       static_cast<OpenCLLIB::Entrypoints>(inst.GetSingleWordOperand(3));

@@ -1,4 +1,4 @@
-std::string translator::src_aggregate_element_type(uint32_t tyid) const {
+std::string translator_impl::src_aggregate_element_type(uint32_t tyid) const {
   // OpenCL forbids pointers inside structs/arrays, so encode every pointer leaf
   // as a same-width integer (ulong under Physical64). Access chains reconstruct
   // the real pointer type on the way in (see emit_access_chain). Non-pointer
@@ -9,10 +9,10 @@ std::string translator::src_aggregate_element_type(uint32_t tyid) const {
   return src_type(tyid);
 }
 
-bool translator::src_composite_path(const spvtools::opt::Instruction &inst,
-                                    unsigned first, uint32_t tyid,
-                                    std::string &path,
-                                    uint32_t &leaf_tyid) const {
+bool translator_impl::src_composite_path(const spvtools::opt::Instruction &inst,
+                                         unsigned first, uint32_t tyid,
+                                         std::string &path,
+                                         uint32_t &leaf_tyid) const {
   path.clear();
   for (unsigned i = first; i < inst.NumOperands(); i++) {
     auto idx = inst.GetSingleWordOperand(i);
@@ -44,15 +44,16 @@ bool translator::src_composite_path(const spvtools::opt::Instruction &inst,
   return true;
 }
 
-std::string translator::src_aggregate_element_value(uint32_t tyid,
-                                                    uint32_t object) const {
+std::string
+translator_impl::src_aggregate_element_value(uint32_t tyid,
+                                             uint32_t object) const {
   if (type_for(tyid)->kind() == Type::Kind::kPointer) {
     return "(" + src_aggregate_element_type(tyid) + ")(" + var_for(object) + ")";
   }
   return var_for(object);
 }
 
-std::string translator::address_space_qualifier(uint32_t storage) const {
+std::string translator_impl::address_space_qualifier(uint32_t storage) const {
   switch (storage) {
   case SpvStorageClassCrossWorkgroup:
     return "global";
@@ -81,7 +82,7 @@ std::string translator::address_space_qualifier(uint32_t storage) const {
   }
 }
 
-void translator::declare_pointee_alias(uint32_t tyid) {
+void translator_impl::declare_pointee_alias(uint32_t tyid) {
   // SPIR-V memory is untyped: OpBitcast freely reinterprets pointers and the
   // resulting loads/stores are well-defined, so the emitted C must not be
   // subject to type-based alias analysis (e.g. a `*(ulong*)` load of float
@@ -126,9 +127,9 @@ void translator::declare_pointee_alias(uint32_t tyid) {
   }
 }
 
-translator::MemoryAccess
-translator::memory_access_operands(const Instruction &inst,
-                                   unsigned index) const {
+translator_impl::MemoryAccess
+translator_impl::memory_access_operands(const Instruction &inst,
+                                        unsigned index) const {
   MemoryAccess access;
   access.next = index;
   if (inst.NumOperands() <= index) {
@@ -145,12 +146,12 @@ translator::memory_access_operands(const Instruction &inst,
   return access;
 }
 
-uint32_t translator::pointee_type_id(uint32_t val) const {
+uint32_t translator_impl::pointee_type_id(uint32_t val) const {
   auto pointee = type_for_val(val)->AsPointer()->pointee_type();
   return m_ir->get_type_mgr()->GetId(pointee);
 }
 
-uint32_t translator::natural_alignment(uint32_t tyid) const {
+uint32_t translator_impl::natural_alignment(uint32_t tyid) const {
   auto tymgr = m_ir->get_type_mgr();
   const Type *ty = type_for(tyid);
   switch (ty->kind()) {
@@ -189,13 +190,13 @@ uint32_t translator::natural_alignment(uint32_t tyid) const {
   }
 }
 
-bool translator::is_underaligned(uint32_t tyid,
-                                 const MemoryAccess &access) const {
+bool translator_impl::is_underaligned(uint32_t tyid,
+                                      const MemoryAccess &access) const {
   return (access.mask & SpvMemoryAccessAlignedMask) && access.alignment != 0 &&
          access.alignment < natural_alignment(tyid);
 }
 
-void translator::declare_underaligned_aliases() {
+void translator_impl::declare_underaligned_aliases() {
   // A C dereference asserts the pointee's natural alignment, but a SPIR-V
   // access can promise less (an Aligned memory operand below the type's
   // natural alignment -- e.g. an i64 load of a 4-aligned pair of floats
@@ -250,15 +251,17 @@ void translator::declare_underaligned_aliases() {
   }
 }
 
-std::string translator::src_access_pointee(uint32_t tyid,
-                                           const MemoryAccess &access) const {
+std::string
+translator_impl::src_access_pointee(uint32_t tyid,
+                                    const MemoryAccess &access) const {
   if (is_underaligned(tyid, access)) {
     return m_underaligned_aliases.at({tyid, access.alignment});
   }
   return m_pointee_aliases.at(tyid);
 }
 
-std::string translator::src_pointer_type(uint32_t storage, uint32_t tyid, bool signedty) const {
+std::string translator_impl::src_pointer_type(uint32_t storage, uint32_t tyid,
+                                              bool signedty) const {
   // Every pointee type (including arrays, which are struct-wrapped) has a flat
   // type name, so a pointer is just "<pointee> <addrspace>*". A
   // pointer-to-array becomes a pointer-to-wrapper, which carries the correct
@@ -279,7 +282,7 @@ std::string translator::src_pointer_type(uint32_t storage, uint32_t tyid, bool s
   return typestr;
 }
 
-bool translator::translate_type(const Instruction &inst) {
+bool translator_impl::translate_type(const Instruction &inst) {
   std::string typestr;
   std::string signedtypestr;
   auto opcode = inst.opcode();
@@ -472,7 +475,7 @@ bool translator::translate_type(const Instruction &inst) {
   return true;
 }
 
-bool translator::translate_types_values() {
+bool translator_impl::translate_types_values() {
   for (auto &inst : m_ir->module()->types_values()) {
     auto opcode = inst.opcode();
     auto rtype = inst.type_id();

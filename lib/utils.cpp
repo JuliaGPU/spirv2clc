@@ -1,22 +1,23 @@
-uint32_t translator::type_id_for(uint32_t val) const {
+uint32_t translator_impl::type_id_for(uint32_t val) const {
   auto defuse = m_ir->get_def_use_mgr();
   return defuse->GetDef(val)->type_id();
 }
 
 uint32_t
-translator::type_id_for(const spvtools::opt::analysis::Type *type) const {
+translator_impl::type_id_for(const spvtools::opt::analysis::Type *type) const {
   return m_ir->get_type_mgr()->GetId(type);
 }
 
-spvtools::opt::analysis::Type *translator::type_for(uint32_t tyid) const {
+spvtools::opt::analysis::Type *translator_impl::type_for(uint32_t tyid) const {
   return m_ir->get_type_mgr()->GetType(tyid);
 }
 
-spvtools::opt::analysis::Type *translator::type_for_val(uint32_t val) const {
+spvtools::opt::analysis::Type *
+translator_impl::type_for_val(uint32_t val) const {
   return type_for(type_id_for(val));
 }
 
-uint32_t translator::array_type_get_length(uint32_t tyid) const {
+uint32_t translator_impl::array_type_get_length(uint32_t tyid) const {
   auto type = type_for(tyid);
   auto tarray = type->AsArray();
   auto const &length_info = tarray->length_info();
@@ -39,8 +40,9 @@ uint32_t translator::array_type_get_length(uint32_t tyid) const {
   return length_info.words[1];
 }
 
-std::string translator::src_var_decl(uint32_t tyid, const std::string &name,
-                                     uint32_t val) const {
+std::string translator_impl::src_var_decl(uint32_t tyid,
+                                          const std::string &name,
+                                          uint32_t val) const {
   // Array types are struct-wrapped and pointers/pointers-to-arrays all have a
   // registered flat type name, so a uniform "TYPE name" declaration works for
   // every type; no per-shape declarator construction is needed.
@@ -52,9 +54,9 @@ std::string translator::src_var_decl(uint32_t tyid, const std::string &name,
 }
 
 std::string
-translator::src_access_chain(const std::string &src_base,
-                             const spvtools::opt::analysis::Type *ty,
-                             uint32_t index) const {
+translator_impl::src_access_chain(const std::string &src_base,
+                                  const spvtools::opt::analysis::Type *ty,
+                                  uint32_t index) const {
   std::string ret = "(" + src_base + ")";
   if (ty->kind() == spvtools::opt::analysis::Type::kStruct) {
     auto cstmgr = m_ir->get_constant_mgr();
@@ -73,7 +75,7 @@ translator::src_access_chain(const std::string &src_base,
   }
 }
 
-std::string translator::src_signed_index(uint32_t index) const {
+std::string translator_impl::src_signed_index(uint32_t index) const {
   // Match the index's own width so a negative bit pattern (e.g. a 32-bit
   // 0xFFFFFFFF meaning -1) keeps its sign before promotion to the pointer's
   // offset width; default to 64-bit for non-integer/unknown index types.
@@ -85,9 +87,8 @@ std::string translator::src_signed_index(uint32_t index) const {
   return std::string("(") + signed_ty + ")(" + var_for(index) + ")";
 }
 
-std::string
-translator::src_type_memory_object_declaration(uint32_t tid, uint32_t val,
-                                               const std::string &name) const {
+std::string translator_impl::src_type_memory_object_declaration(
+    uint32_t tid, uint32_t val, const std::string &name) const {
   // Arrays are struct-wrapped and have a flat type name, so the declaration is
   // uniform "TYPE qualifiers name" for every type.
   std::string ret = src_type(tid);
@@ -105,7 +106,7 @@ translator::src_type_memory_object_declaration(uint32_t tid, uint32_t val,
   return ret;
 }
 
-std::string translator::src_type_boolean_for_val(uint32_t val) const {
+std::string translator_impl::src_type_boolean_for_val(uint32_t val) const {
   if (m_boolean_src_types.count(val)) {
     return m_boolean_src_types.at(val);
   } else {
@@ -155,7 +156,7 @@ std::string translator::src_type_boolean_for_val(uint32_t val) const {
   return "UNIMPLEMENTED TYPE FOR BOOLEAN";
 }
 
-bool translator::get_null_constant(uint32_t tyid, std::string &src) const {
+bool translator_impl::get_null_constant(uint32_t tyid, std::string &src) const {
   auto type = type_for(tyid);
   switch (type->kind()) {
   case Type::Kind::kInteger:
@@ -356,7 +357,7 @@ std::unordered_set<std::string> gReservedIdentifiers = {
     "pipe",
 };
 
-bool translator::is_valid_identifier(const std::string& name) const {
+bool translator_impl::is_valid_identifier(const std::string &name) const {
   // Check the name isn't already used
   for (auto it = m_names.begin(); it != m_names.end(); ++it) {
     if (it->second == name) {
@@ -368,7 +369,8 @@ bool translator::is_valid_identifier(const std::string& name) const {
   return gReservedIdentifiers.count(name) == 0;
 }
 
-std::string translator::make_valid_identifier(const std::string& name) const {
+std::string
+translator_impl::make_valid_identifier(const std::string &name) const {
   std::string newname = name;
 
   bool is_valid = is_valid_identifier(newname);
@@ -393,8 +395,8 @@ std::string translator::make_valid_identifier(const std::string& name) const {
   return newname;
 }
 
-std::optional<std::string>
-translator::get_string_literal(const spvtools::opt::Instruction &inst) const {
+std::optional<std::string> translator_impl::get_string_literal(
+    const spvtools::opt::Instruction &inst) const {
   auto rtype = inst.type_id();
   auto type = type_for(rtype);
 
@@ -498,7 +500,7 @@ translator::get_string_literal(const spvtools::opt::Instruction &inst) const {
 }
 
 std::optional<std::string>
-translator::string_literal_for(uint32_t var_id) const {
+translator_impl::string_literal_for(uint32_t var_id) const {
   auto it = m_constant_string_literals.find(var_id);
   if (it != m_constant_string_literals.end()) {
     return it->second;

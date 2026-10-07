@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "translator.h"
 #include "spirv2clc.h"
 
 #define CL_TARGET_OPENCL_VERSION 120
@@ -90,13 +91,27 @@ const spvtools::MessageConsumer spvtools_message_consumer =
 namespace spirv2clc {
 
 translator::translator(spv_target_env env, unsigned opencl_c_version)
-    : m_target_env(env), m_opencl_c_version(opencl_c_version) {}
+    : m_impl(std::make_unique<translator_impl>(env, opencl_c_version)) {}
 
 translator::~translator() = default;
 translator::translator(translator &&) = default;
 translator &translator::operator=(translator &&) = default;
 
-std::string translator::note_unsupported(const std::string &what) const {
+int translator::translate(const std::string &assembly, std::string *srcout) {
+  return m_impl->translate(assembly, srcout);
+}
+
+int translator::translate(const std::vector<uint32_t> &binary,
+                          std::string *srcout) {
+  return m_impl->translate(binary, srcout);
+}
+
+translator_impl::translator_impl(spv_target_env env, unsigned opencl_c_version)
+    : m_target_env(env), m_opencl_c_version(opencl_c_version) {}
+
+translator_impl::~translator_impl() = default;
+
+std::string translator_impl::note_unsupported(const std::string &what) const {
   std::cerr << "UNIMPLEMENTED " << what << std::endl;
   m_translation_failed = true;
   return "UNIMPLEMENTED";
@@ -107,7 +122,7 @@ std::string translator::note_unsupported(const std::string &what) const {
 #include "instns.cpp"
 #include "instns_ext.cpp"
 
-bool translator::translate_capabilities() {
+bool translator_impl::translate_capabilities() {
   // Emit each enabling pragma at most once, even when several capabilities map
   // to the same extension (e.g. the various subgroup capabilities).
   std::unordered_set<std::string> enabled_extensions;
@@ -201,7 +216,7 @@ bool translator::translate_capabilities() {
   return true;
 }
 
-bool translator::translate_extensions() const {
+bool translator_impl::translate_extensions() const {
   // SPIR-V extensions we can honor; they need no emission of their own (the
   // capabilities/instructions they enable are handled elsewhere).
   static const std::unordered_set<std::string> handled = {
@@ -220,7 +235,7 @@ bool translator::translate_extensions() const {
   return true;
 }
 
-bool translator::translate_extended_instructions_imports() const {
+bool translator_impl::translate_extended_instructions_imports() const {
   for (auto &inst : m_ir->ext_inst_imports()) {
     assert(inst.opcode() == spv::Op::OpExtInstImport);
     auto name = inst.GetOperand(1).AsString();
@@ -232,7 +247,7 @@ bool translator::translate_extended_instructions_imports() const {
   return true;
 }
 
-bool translator::translate_memory_model() const {
+bool translator_impl::translate_memory_model() const {
   auto inst = m_ir->module()->GetMemoryModel();
   auto add = inst->GetSingleWordOperand(0);
   auto mem = inst->GetSingleWordOperand(1);
@@ -248,7 +263,7 @@ bool translator::translate_memory_model() const {
   return true;
 }
 
-bool translator::translate_entry_points() {
+bool translator_impl::translate_entry_points() {
   for (auto &ep : m_ir->module()->entry_points()) {
     auto model = ep.GetSingleWordOperand(0);
     auto func = ep.GetSingleWordOperand(1);
@@ -264,7 +279,7 @@ bool translator::translate_entry_points() {
   return true;
 }
 
-bool translator::translate_execution_modes() {
+bool translator_impl::translate_execution_modes() {
   for (auto &em : m_ir->module()->execution_modes()) {
     auto ep = em.GetSingleWordOperand(0);
     auto mode = em.GetSingleWordOperand(1);
@@ -297,7 +312,7 @@ bool translator::translate_execution_modes() {
   return true;
 }
 
-bool translator::translate_debug_instructions() {
+bool translator_impl::translate_debug_instructions() {
   // Debug 1
   for (auto &inst : m_ir->module()->debugs1()) {
     auto opcode = inst.opcode();
@@ -363,7 +378,7 @@ bool translator::translate_debug_instructions() {
   return true;
 }
 
-bool translator::translate_annotations() {
+bool translator_impl::translate_annotations() {
   for (auto &inst : m_ir->module()->annotations()) {
     auto opcode = inst.opcode();
     switch (opcode) {
@@ -552,7 +567,7 @@ bool translator::translate_annotations() {
   return true;
 }
 
-void translator::compute_workgroup_params() {
+void translator_impl::compute_workgroup_params() {
   auto defuse = m_ir->get_def_use_mgr();
   for (auto &func : *m_ir->module()) {
     auto fid = func.DefInst().result_id();
@@ -596,7 +611,8 @@ void translator::compute_workgroup_params() {
   }
 }
 
-void translator::emit_function_signature(Function &func, bool is_prototype) {
+void translator_impl::emit_function_signature(Function &func,
+                                              bool is_prototype) {
   auto &dinst = func.DefInst();
   auto rtype = dinst.type_id();
   auto result = dinst.result_id();
@@ -688,7 +704,7 @@ void translator::emit_function_signature(Function &func, bool is_prototype) {
   }
 }
 
-bool translator::translate_function(Function &func) {
+bool translator_impl::translate_function(Function &func) {
   auto &dinst = func.DefInst();
   auto result = dinst.result_id();
 
@@ -845,7 +861,7 @@ bool translator::translate_function(Function &func) {
   return !error;
 }
 
-int translator::translate() {
+int translator_impl::translate() {
 
   reset();
 
@@ -925,7 +941,8 @@ int translator::translate() {
   return 0;
 }
 
-bool translator::validate_module(const std::vector<uint32_t> &binary) const {
+bool translator_impl::validate_module(
+    const std::vector<uint32_t> &binary) const {
   spv_diagnostic diag;
   spv_context ctx = spvContextCreate(m_target_env);
   spv_result_t res =
@@ -940,7 +957,8 @@ bool translator::validate_module(const std::vector<uint32_t> &binary) const {
   return true;
 }
 
-int translator::translate(const std::string &assembly, std::string *srcout) {
+int translator_impl::translate(const std::string &assembly,
+                               std::string *srcout) {
 
   m_ir = BuildModule(m_target_env, spvtools_message_consumer, assembly);
 
@@ -959,8 +977,8 @@ int translator::translate(const std::string &assembly, std::string *srcout) {
   return ret;
 }
 
-int translator::translate(const std::vector<uint32_t> &binary,
-                          std::string *srcout) {
+int translator_impl::translate(const std::vector<uint32_t> &binary,
+                               std::string *srcout) {
 
   m_ir = BuildModule(m_target_env, spvtools_message_consumer,
                      binary.data(), binary.size());
