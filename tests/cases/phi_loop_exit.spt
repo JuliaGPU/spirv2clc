@@ -35,7 +35,7 @@
                OpStore %o1 %lcssa
                OpReturn
                OpFunctionEnd
-; CHECK: uint inext = i + ((uint)1);
+; CHECK: uint inext = i + (uint)1;
 ; CHECK: i_phi = inext;
 ; CHECK-NEXT: lcssa_phi = i;
 ; CHECK: lcssa = lcssa_phi;

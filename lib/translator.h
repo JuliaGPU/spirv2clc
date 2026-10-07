@@ -26,6 +26,7 @@
 #include <utility>
 #include <vector>
 
+#include "cexpr.h"
 #include <spirv-tools/libspirv.h>
 #include <spirv/unified1/spirv.h>
 
@@ -99,44 +100,13 @@ private:
 
   uint32_t array_type_get_length(uint32_t tyid) const;
 
-  // The C spelling of value `id`: its literal or builtin query for values
-  // that are never declared, its identifier otherwise.
-  std::string var_for(uint32_t id) const {
-    if (m_literals.count(id)) {
-      return m_literals.at(id);
-    } else if (m_builtin_values.count(id)) {
-      switch (m_builtin_values.at(id)) {
-      case SpvBuiltInWorkDim:
-        return src_function_call("get_work_dim");
-      case SpvBuiltInSubgroupSize:
-        return src_function_call("get_sub_group_size");
-      case SpvBuiltInSubgroupMaxSize:
-        return src_function_call("get_max_sub_group_size");
-      case SpvBuiltInNumSubgroups:
-        return src_function_call("get_num_sub_groups");
-      case SpvBuiltInSubgroupId:
-        return src_function_call("get_sub_group_id");
-      case SpvBuiltInSubgroupLocalInvocationId:
-        return src_function_call("get_sub_group_local_id");
-      case SpvBuiltInGlobalInvocationId:
-      case SpvBuiltInGlobalOffset:
-      case SpvBuiltInGlobalSize:
-      case SpvBuiltInWorkgroupId:
-      case SpvBuiltInWorkgroupSize:
-      case SpvBuiltInLocalInvocationId:
-      case SpvBuiltInNumWorkgroups:
-        // Vector built-in used as a whole value (e.g. an OpPhi incoming).
-        return builtin_vector(id);
-      default:
-        return note_unsupported("builtin value " +
-                                std::to_string(m_builtin_values.at(id)));
-      }
-    } else if (m_names.count(id)) {
-      return m_names.at(id);
-    } else {
-      return note_unsupported("unnamed id " + std::to_string(id));
-    }
-  }
+  // The identifier of `id` (see assign_names).
+  const std::string &name_of(uint32_t id) const;
+
+  // Value `id` where it is used: the expression bound to it if it has one
+  // (constants, addresses of program-scope variables, builtin queries: values
+  // that are never declared), else its identifier.
+  c::expr_ref value(uint32_t id) const;
 
   // Give every result id of the module its identifier (see m_names).
   void assign_names();
@@ -149,52 +119,55 @@ private:
   std::string src_var_decl(uint32_t tyid, const std::string &name) const;
 
   std::string src_var_decl(uint32_t val) const {
-    return src_var_decl(type_id_for(val), var_for(val));
+    return src_var_decl(type_id_for(val), name_of(val));
   }
 
-  std::string src_access_chain(const std::string &src_base,
-                               const spvtools::opt::analysis::Type *ty,
-                               uint32_t index) const;
-
-  // Render an access-chain index as a signed offset. SPIR-V/LLVM access-chain
-  // indices are signed (Julia emits -1 for 1-based-to-0-based pointer
-  // adjustment); emitting them as their raw unsigned value overflows the
-  // pointer arithmetic (undefined behavior) and miscompiles.
-  std::string src_signed_index(uint32_t index) const;
+  // An access-chain index as a signed offset. SPIR-V/LLVM access-chain indices
+  // are signed (Julia emits -1 for 1-based-to-0-based pointer adjustment);
+  // using them as their raw unsigned value overflows the pointer arithmetic
+  // (undefined behavior) and miscompiles.
+  c::expr_ref signed_index(uint32_t index) const;
 
   bool emit_access_chain(const spvtools::opt::Instruction &inst,
-                         bool ptr_variant, std::string &sval) const;
+                         bool ptr_variant, c::expr_ref &result) const;
 
-  std::string src_vec_comp(uint32_t val, uint32_t comp) const {
-    std::stringstream scomp;
-    scomp << std::hex << comp;
-    return var_for(val) + ".s" + scomp.str();
+  // Component `comp` of vector value `val`.
+  c::expr_ref vector_component(uint32_t val, uint32_t comp) const;
+
+  // Reinterpret the bits of `e` (as_<type>), or the bits of value `val` as the
+  // signed variant of its type.
+  c::expr_ref as_type(uint32_t dtyid, c::expr_ref e) const {
+    return c::call("as_" + src_type(dtyid), {std::move(e)});
+  }
+  c::expr_ref as_signed(uint32_t val) const {
+    return c::call("as_" + src_type_signed(type_id_for(val)), {value(val)});
   }
 
-  std::string src_as(uint32_t dtyid, const std::string &src) const {
-    return "as_" + src_type(dtyid) + "(" + src + ")";
+  // A C conversion of `e` to `tyid`, or to its signed variant.
+  c::expr_ref cast_to(uint32_t tyid, c::expr_ref e) const {
+    return c::cast(src_type(tyid), std::move(e));
+  }
+  c::expr_ref cast_to_signed(uint32_t tyid, c::expr_ref e) const {
+    return c::cast(src_type_signed(tyid), std::move(e));
   }
 
-  std::string src_as(uint32_t dtyid, uint32_t val) const {
-    return src_as(dtyid, var_for(val));
-  }
-
-  std::string src_as_signed(uint32_t val) const {
-    auto varty = type_id_for(val);
-    return "as_" + src_type_signed(varty) + "(" + var_for(val) + ")";
-  }
+  // Call `fn` on values, or on their signed reinterpretations.
+  c::expr_ref call_values(const std::string &fn,
+                          const std::vector<uint32_t> &args) const;
+  c::expr_ref call_signed(const std::string &fn,
+                          const std::vector<uint32_t> &args) const;
 
   // How SPIR-V types are represented in C. Most are the C type src_type
   // spells, with two exceptions:
   //  - OpenCL C forbids pointers inside structs and arrays, so a pointer stored
   //    in one is an integer of pointer width there (src_storage_type), and is
-  //    converted on the way in and out (src_to_storage, src_from_storage).
+  //    converted on the way in and out (to_storage, from_storage).
   //  - OpenCL C has no boolean vectors. A vector of OpTypeBool is an intN mask
   //    with true as -1: what the vector relational and logical operators
   //    produce and what select, any and all test (the sign bit). A scalar bool
   //    is a C bool. Relational results are brought into this form by
-  //    src_relational_mask, and src_select_condition adapts a mask to the
-  //    width a vector select needs.
+  //    relational_mask, and select_condition adapts a mask to the width a
+  //    vector select needs.
   std::string src_type(uint32_t id) const {
     auto it = m_type_info.find(id);
     if (it != m_type_info.end()) {
@@ -225,18 +198,17 @@ private:
   }
 
   std::string src_storage_type(uint32_t tyid) const;
-  std::string src_to_storage(uint32_t tyid, const std::string &value) const;
-  std::string src_from_storage(uint32_t tyid, const std::string &stored) const;
+  c::expr_ref to_storage(uint32_t tyid, c::expr_ref value) const;
+  c::expr_ref from_storage(uint32_t tyid, c::expr_ref stored) const;
 
   // `result` is the value of a relational builtin or operator applied to
   // `operand`. For a vector operand it is a mask as wide as the operand's
   // elements; narrow or widen it to the canonical intN.
-  std::string src_relational_mask(uint32_t operand,
-                                  const std::string &result) const;
+  c::expr_ref relational_mask(uint32_t operand, c::expr_ref result) const;
 
   // The condition of a select of `result_tyid` values: a vector select needs a
   // mask as wide as the selected elements.
-  std::string src_select_condition(uint32_t cond, uint32_t result_tyid) const;
+  c::expr_ref select_condition(uint32_t cond, uint32_t result_tyid) const;
 
   // The C type of the components of vector type `tyid`.
   std::string src_vector_element_type(uint32_t tyid) const;
@@ -246,85 +218,7 @@ private:
 
   std::string src_type_memory_object_declaration(uint32_t tid,
                                                  uint32_t val) const {
-    return src_type_memory_object_declaration(tid, val, var_for(val));
-  }
-
-  std::string src_cast(uint32_t ty, std::string src) const {
-    return "((" + src_type(ty) + ")" + src + ")";
-  }
-
-  std::string src_cast_signed(uint32_t ty, std::string src) const {
-    return "((" + src_type_signed(ty) + ")" + src + ")";
-  }
-
-  std::string src_cast(uint32_t ty, uint32_t val) const {
-    return src_cast(ty, var_for(val));
-  }
-
-  std::string src_cast_signed(uint32_t ty, uint32_t val) const {
-    return src_cast_signed(ty, var_for(val));
-  }
-
-  std::string src_convert(uint32_t val, uint32_t ty) {
-    return "convert_" + src_type(ty) + "(" + var_for(val) + ")";
-  }
-
-  std::string src_convert_signed(uint32_t val, uint32_t ty) {
-    return "convert_" + src_type_signed(ty) + "(" + src_as_signed(val) + ")";
-  }
-
-  std::string src_function_call(const std::string &fn) const {
-    return fn + "()";
-  }
-
-  std::string src_function_call(const std::string &fn,
-                                const std::string &srcop1) const {
-    return fn + "(" + srcop1 + ")";
-  }
-
-  std::string src_function_call(const std::string &fn, uint32_t op1) const {
-    return src_function_call(fn, var_for(op1));
-  }
-
-  std::string src_function_call_signed(const std::string &fn,
-                                       uint32_t op1) const {
-    return src_function_call(fn, src_as_signed(op1));
-  }
-
-  std::string src_function_call(const std::string &fn, uint32_t op1,
-                                uint32_t op2) const {
-    return fn + "(" + var_for(op1) + ", " + var_for(op2) + ")";
-  }
-
-  std::string src_function_call_signed(const std::string &fn, uint32_t op1,
-                                       uint32_t op2) const {
-    return fn + "(" + src_as_signed(op1) + ", " + src_as_signed(op2) + ")";
-  }
-
-  std::string src_function_call(const std::string &fn, uint32_t op1,
-                                uint32_t op2, uint32_t op3) const {
-    return fn + "(" + var_for(op1) + ", " + var_for(op2) + ", " + var_for(op3) +
-           ")";
-  }
-
-  std::string src_function_call_signed(const std::string &fn, uint32_t op1,
-                                       uint32_t op2, uint32_t op3) const {
-    return fn + "(" + src_as_signed(op1) + ", " + src_as_signed(op2) + ", " +
-           src_as_signed(op3) + ")";
-  }
-
-  std::string src_function_call(const std::string &fn, uint32_t op1,
-                                uint32_t op2, uint32_t op3,
-                                uint32_t op4) const {
-    return fn + "(" + var_for(op1) + ", " + var_for(op2) + ", " + var_for(op3) +
-           ", " + var_for(op4) + ")";
-  }
-
-  std::string src_function_call(const std::string &fn, uint32_t op1,
-                                uint32_t op2, uint32_t op3, uint32_t op4,
-                                uint32_t op5) const {
-    return fn + "(" + var_for(op1) + ", " + var_for(op2) + ", " + var_for(op3) +
-           ", " + var_for(op4) + ", " + var_for(op5) + ")";
+    return src_type_memory_object_declaration(tid, val, name_of(val));
   }
 
   // OpenCL spells 64-bit integer atomics atom_* (cl_khr_int64_*_atomics) and
@@ -333,13 +227,13 @@ private:
   std::string atomic_builtin(const std::string &op, uint32_t ptr) const;
 
   // C11 atomic pointer reinterpretation for atomic load/store (OpenCL C 2.0+),
-  // e.g. "(volatile global atomic_uint*)(v12)". Picks atomic_int/uint/long/
+  // e.g. "(volatile global atomic_uint*)v12". Picks atomic_int/uint/long/
   // ulong/float/double from the pointee type.
-  std::string atomic_c11_pointer(uint32_t ptr) const;
+  c::expr_ref atomic_c11_pointer(uint32_t ptr) const;
 
-  // The CLK_*_MEM_FENCE flags string for a SPIR-V memory-semantics mask (empty
-  // if no memory class is set). Shared by the barrier and fence instructions.
-  std::string fence_flags(uint32_t mem_sem) const;
+  // The CLK_*_MEM_FENCE flags for a SPIR-V memory-semantics mask (0 if no
+  // memory class is set). Shared by the barrier and fence instructions.
+  c::expr_ref fence_flags(uint32_t mem_sem) const;
 
   // The OpenCL address-space keyword for a SPIR-V storage class ("global",
   // "private", ...), empty for storage classes with no qualifier (e.g. Input).
@@ -388,48 +282,50 @@ private:
   // The lvalue for a load/store through `ptr`, honouring the access's
   // MemoryAccess operands: a plain dereference when they claim nothing a C
   // dereference doesn't, a cast through src_access_pointee otherwise.
-  std::string src_dereference(uint32_t ptr, const MemoryAccess &access);
+  c::expr_ref dereference(uint32_t ptr, const MemoryAccess &access);
 
-  // Render the member path selected by the literal indices of an
-  // OpCompositeExtract/OpCompositeInsert (operands `first` onwards), starting
-  // from a composite of type `tyid`, e.g. ".m1.e[2].s0". Sets `leaf_tyid` to
-  // the type of the selected member and `parent_tyid` to that of the
-  // composite holding it.
-  bool src_composite_path(const spvtools::opt::Instruction &inst,
-                          unsigned first, uint32_t tyid, std::string &path,
-                          uint32_t &leaf_tyid, uint32_t &parent_tyid) const;
+  // The member of composite `base` (of type `tyid`) selected by the literal
+  // indices of an OpCompositeExtract/OpCompositeInsert (operands `first`
+  // onwards), e.g. base.m1.e[2].s0. Sets `leaf_tyid` to the type of the
+  // selected member and `parent_tyid` to that of the composite holding it.
+  bool composite_member(const spvtools::opt::Instruction &inst, unsigned first,
+                        uint32_t tyid, c::expr_ref base, c::expr_ref &member,
+                        uint32_t &leaf_tyid, uint32_t &parent_tyid) const;
 
   // A value of type `elem_tyid` as a component of a composite of type
   // `composite_tyid`, and back: pointers in aggregates are in storage form
   // and booleans in vectors are mask elements (see src_type).
-  std::string src_to_component(uint32_t composite_tyid, uint32_t elem_tyid,
-                               const std::string &value) const;
-  std::string src_from_component(uint32_t composite_tyid, uint32_t elem_tyid,
-                                 const std::string &component) const;
+  c::expr_ref to_component(uint32_t composite_tyid, uint32_t elem_tyid,
+                           c::expr_ref value) const;
+  c::expr_ref from_component(uint32_t composite_tyid, uint32_t elem_tyid,
+                             c::expr_ref component) const;
 
-  std::string builtin_vector_extract(uint32_t id, uint32_t idx,
-                                     bool constant) const;
+  // The query of component `idx` of builtin vector value `id`.
+  c::expr_ref builtin_vector_extract(uint32_t id, c::expr_ref idx) const;
 
-  // Materialize a whole vector built-in load (e.g. WorkgroupId) as a vector
-  // literal of its per-dimension queries, used when the load is consumed as a
-  // whole value (OpPhi incoming, store, ...) rather than component-extracted.
-  std::string builtin_vector(uint32_t id) const;
+  // A whole vector built-in load (e.g. WorkgroupId) as a vector literal of its
+  // per-dimension queries, used when the load is consumed as a whole value
+  // (OpPhi incoming, store, ...) rather than component-extracted.
+  c::expr_ref builtin_vector(uint32_t id) const;
+
+  // The value of a load from scalar built-in variable `builtin`.
+  c::expr_ref builtin_scalar(SpvBuiltIn builtin) const;
 
   std::optional<std::string>
   get_string_literal(const spvtools::opt::Instruction &inst) const;
   std::optional<std::string> string_literal_for(uint32_t var_id) const;
 
-  bool get_null_constant(uint32_t tyid, std::string &src) const;
-  std::string
+  c::expr_ref null_constant(uint32_t tyid) const;
+  c::expr_ref
   translate_extended_unary(const spvtools::opt::Instruction &inst) const;
-  std::string
+  c::expr_ref
   translate_extended_binary(const spvtools::opt::Instruction &inst) const;
-  std::string
+  c::expr_ref
   translate_extended_ternary(const spvtools::opt::Instruction &inst) const;
   bool translate_extended_instruction(const spvtools::opt::Instruction &inst,
                                       std::string &src);
-  std::string translate_binop(const spvtools::opt::Instruction &inst) const;
-  std::string
+  c::expr_ref translate_binop(const spvtools::opt::Instruction &inst) const;
+  c::expr_ref
   translate_binop_signed(const spvtools::opt::Instruction &inst) const;
   bool translate_instruction(const spvtools::opt::Instruction &inst,
                              std::string &src);
@@ -471,7 +367,7 @@ private:
     m_derived_names.clear();
     m_type_info.clear();
     m_underaligned_aliases.clear();
-    m_literals.clear();
+    m_bindings.clear();
     m_entry_points.clear();
     m_entry_points_local_size.clear();
     m_entry_points_contraction_off.clear();
@@ -525,7 +421,8 @@ private:
   // (pointee type id, alignment) -> reduced-alignment typedef name (see
   // underaligned_alias).
   std::map<std::pair<uint32_t, uint32_t>, std::string> m_underaligned_aliases;
-  std::unordered_map<uint32_t, std::string> m_literals;
+  // Expressions standing for values that are never declared (see value).
+  std::unordered_map<uint32_t, c::expr_ref> m_bindings;
   std::unordered_map<uint32_t, std::string> m_entry_points;
   std::unordered_map<uint32_t, std::tuple<uint32_t, uint32_t, uint32_t>>
       m_entry_points_local_size;

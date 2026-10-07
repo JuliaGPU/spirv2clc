@@ -48,29 +48,25 @@ std::string translator_impl::src_var_decl(uint32_t tyid,
   return src_type(tyid) + " " + name;
 }
 
-std::string
-translator_impl::src_access_chain(const std::string &src_base,
-                                  const spvtools::opt::analysis::Type *ty,
-                                  uint32_t index) const {
-  std::string ret = "(" + src_base + ")";
-  if (ty->kind() == spvtools::opt::analysis::Type::kStruct) {
-    auto cstmgr = m_ir->get_constant_mgr();
-    auto idxcst = cstmgr->FindDeclaredConstant(index);
-    if (idxcst == nullptr) {
-      return "UNIMPLEMENTED";
-    }
-    return "&(" + ret + "->m" + std::to_string(idxcst->GetZeroExtendedValue()) +
-           ")";
-  } else if (ty->kind() == spvtools::opt::analysis::Type::kArray) {
-    // Arrays are struct-wrapped; index through the 'e' member. The base is
-    // always a pointer expression here, so dereference with '->'.
-    return "&(" + ret + "->e[" + src_signed_index(index) + "])";
-  } else {
-    return "UNIMPLEMENTED";
+const std::string &translator_impl::name_of(uint32_t id) const {
+  auto it = m_names.find(id);
+  if (it == m_names.end()) {
+    static const std::string unsupported = "UNIMPLEMENTED";
+    note_unsupported("unnamed id " + std::to_string(id));
+    return unsupported;
   }
+  return it->second;
 }
 
-std::string translator_impl::src_signed_index(uint32_t index) const {
+c::expr_ref translator_impl::value(uint32_t id) const {
+  auto it = m_bindings.find(id);
+  if (it != m_bindings.end()) {
+    return it->second;
+  }
+  return c::name(name_of(id));
+}
+
+c::expr_ref translator_impl::signed_index(uint32_t index) const {
   // Match the index's own width so a negative bit pattern (e.g. a 32-bit
   // 0xFFFFFFFF meaning -1) keeps its sign before promotion to the pointer's
   // offset width; default to 64-bit for non-integer/unknown index types.
@@ -78,8 +74,34 @@ std::string translator_impl::src_signed_index(uint32_t index) const {
   unsigned width = ty != nullptr && ty->kind() == Type::Kind::kInteger
                        ? ty->AsInteger()->width()
                        : 64;
-  const char *signed_ty = width <= 32 ? "int" : "long";
-  return std::string("(") + signed_ty + ")(" + var_for(index) + ")";
+  return c::cast(width <= 32 ? "int" : "long", value(index));
+}
+
+c::expr_ref translator_impl::vector_component(uint32_t val,
+                                              uint32_t comp) const {
+  std::stringstream scomp;
+  scomp << std::hex << comp;
+  return c::member(value(val), "s" + scomp.str());
+}
+
+c::expr_ref
+translator_impl::call_values(const std::string &fn,
+                             const std::vector<uint32_t> &args) const {
+  std::vector<c::expr_ref> exprs;
+  for (auto arg : args) {
+    exprs.push_back(value(arg));
+  }
+  return c::call(fn, std::move(exprs));
+}
+
+c::expr_ref
+translator_impl::call_signed(const std::string &fn,
+                             const std::vector<uint32_t> &args) const {
+  std::vector<c::expr_ref> exprs;
+  for (auto arg : args) {
+    exprs.push_back(as_signed(arg));
+  }
+  return c::call(fn, std::move(exprs));
 }
 
 std::string translator_impl::src_type_memory_object_declaration(
@@ -129,27 +151,27 @@ static unsigned element_width(const Type *vec) {
   }
 }
 
-std::string
-translator_impl::src_relational_mask(uint32_t operand,
-                                     const std::string &result) const {
+c::expr_ref translator_impl::relational_mask(uint32_t operand,
+                                             c::expr_ref result) const {
   auto type = type_for_val(operand);
   if (type->kind() != Type::Kind::kVector || element_width(type) == 32) {
     return result;
   }
   auto count = std::to_string(type->AsVector()->element_count());
-  return "convert_int" + count + "(" + result + ")";
+  return c::call("convert_int" + count, {std::move(result)});
 }
 
-std::string translator_impl::src_select_condition(uint32_t cond,
-                                                  uint32_t result_tyid) const {
+c::expr_ref translator_impl::select_condition(uint32_t cond,
+                                              uint32_t result_tyid) const {
   auto result_type = type_for(result_tyid);
   if (type_for_val(cond)->kind() != Type::Kind::kVector ||
       element_width(result_type) == 32) {
-    return var_for(cond);
+    return value(cond);
   }
   auto count = std::to_string(result_type->AsVector()->element_count());
-  return "convert_" + signed_int_type(element_width(result_type)) + count +
-         "(" + var_for(cond) + ")";
+  return c::call("convert_" + signed_int_type(element_width(result_type)) +
+                     count,
+                 {value(cond)});
 }
 
 std::string translator_impl::src_vector_element_type(uint32_t tyid) const {
@@ -160,52 +182,36 @@ std::string translator_impl::src_vector_element_type(uint32_t tyid) const {
   return src_type(type_id_for(elem));
 }
 
-bool translator_impl::get_null_constant(uint32_t tyid, std::string &src) const {
+c::expr_ref translator_impl::null_constant(uint32_t tyid) const {
   auto type = type_for(tyid);
   switch (type->kind()) {
   case Type::Kind::kInteger:
-    src = src_cast(tyid, "0");
-    break;
+    return cast_to(tyid, c::literal("0"));
   case Type::Kind::kFloat: {
     // Emit a width-typed zero so it doesn't default to double and create
     // ambiguous overloads (e.g. isordered(float, 0.0)).
     auto width = type->AsFloat()->width();
-    if (width == 16) {
-      src = "0.0h";
-    } else if (width == 32) {
-      src = "0.0f";
-    } else {
-      src = "0.0";
-    }
-    break;
+    return c::literal(width == 16 ? "0.0h" : width == 32 ? "0.0f" : "0.0");
   }
   case Type::Kind::kArray:
   case Type::Kind::kStruct:
     // Both are emitted as C structs (arrays are struct-wrapped). Use a
     // compound literal so the value is valid as an rvalue too, not just in
     // initializer position.
-    src = "((" + src_type(tyid) + "){0})";
-    break;
+    return c::compound_literal(src_type(tyid), {c::literal("0")});
   case Type::Kind::kBool:
-    src = "false";
-    break;
+    return c::literal("false");
   case Type::Kind::kPointer:
     // OpenCL 1.2 represents the null pointer as a cast-from-zero.
-    src = src_cast(tyid, "0");
-    break;
+    return cast_to(tyid, c::literal("0"));
   case Type::Kind::kVector:
-    src = "((" + src_type(tyid) + ")(0))";
-    break;
+    return c::vector_literal(src_type(tyid), {c::literal("0")});
   case Type::Kind::kEvent:
-    src = "0";
-    break;
+    return c::literal("0");
   default:
-    std::cerr << "UNIMPLEMENTED null constant type " << type->kind()
-              << std::endl;
-    return false;
+    return c::literal(note_unsupported("null constant of type kind " +
+                                       std::to_string(type->kind())));
   }
-
-  return true;
 }
 
 std::unordered_set<std::string> gReservedIdentifiers = {

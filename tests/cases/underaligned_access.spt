@@ -46,7 +46,7 @@
 ; CHECK: typedef ulong __attribute__((may_alias)) [[U:ma[0-9]+]];
 ; CHECK: typedef [[U]] __attribute__((aligned(4))) [[UA:ma[0-9]+a4]];
 ; The 4-aligned i64 load and store go through it ...
-; CHECK: = *(([[UA]] private*)[[PUN:v[0-9]+]]);
-; CHECK: *(([[UA]] private*)[[PUN]]) = ((ulong)2);
+; CHECK: = *([[UA]] private*)[[PUN:v[0-9]+]];
+; CHECK: *([[UA]] private*)[[PUN]] = (ulong)2;
 ; ... while the naturally-aligned (Aligned 8) store stays a plain dereference.
 ; CHECK: *{{v[0-9]+}} = [[VAL:v[0-9]+]];

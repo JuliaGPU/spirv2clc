@@ -28,4 +28,4 @@
                OpFunctionEnd
 ; CHECK: typedef uchar __attribute__((may_alias)) [[UC:ma[0-9]+]];
 ; CHECK: constant arr{{[0-9]+}} {{.*}}_storage =
-; CHECK: ([[UC]] constant*)(&
+; CHECK: ([[UC]] constant*)&

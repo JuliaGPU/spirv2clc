@@ -32,4 +32,4 @@
                OpReturn
                OpFunctionEnd
 ; CHECK: = *(
-; CHECK: for (ulong _i = 0; _i < ((ulong)4); ++_i) ((uchar private*)({{.*}}))[_i] = ((uchar private*)({{.*}}))[_i];
+; CHECK: for (ulong _i = 0; _i < (ulong)4; ++_i) ((uchar private*){{v[0-9]+}})[_i] = ((uchar private*){{v[0-9]+}})[_i];

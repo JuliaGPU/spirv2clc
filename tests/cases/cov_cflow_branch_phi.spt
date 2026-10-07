@@ -43,10 +43,10 @@
 ; CHECK: entry:
 ; CHECK: if (cond) { goto then;} else { goto els;}
 ; CHECK: then:
-; CHECK: res_phi = ((uint)1);
+; CHECK: res_phi = (uint)1;
 ; CHECK: goto merge;
 ; CHECK: els:
-; CHECK: res_phi = ((uint)2);
+; CHECK: res_phi = (uint)2;
 ; CHECK: goto merge;
 ; CHECK: merge:
 ; CHECK-NEXT: res = res_phi;

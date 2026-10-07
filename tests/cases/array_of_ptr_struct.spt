@@ -28,4 +28,4 @@
 ; CHECK: typedef uint __attribute__((may_alias)) [[E:ma[0-9]+]];
 ; CHECK: typedef struct { ulong e[2]; }
 ; CHECK: typedef [[E]] global* __attribute__((may_alias)) [[P:ma[0-9]+]];
-; CHECK: = ([[P]] private*)(
+; CHECK: = ([[P]] private*)&

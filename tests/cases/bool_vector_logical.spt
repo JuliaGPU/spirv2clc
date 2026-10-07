@@ -60,9 +60,9 @@
                OpReturn
                OpFunctionEnd
 ; CHECK-NOT: bool4
-; CHECK: int4 [[CMP:v[0-9]+]] = {{.*}} != ((float4)(0));
-; CHECK: [[CMP]] && ((int4)(-1, -1, -1, -1))
-; CHECK: || ((int4)(0))
-; CHECK: int4 [[CMPD:v[0-9]+]] = convert_int4({{.*}} != ((double4)(0)));
-; CHECK: int4 [[ANDD:v[0-9]+]] = [[CMPD]] && ((int4)(-1, -1, -1, -1));
+; CHECK: int4 [[CMP:v[0-9]+]] = {{.*}} != (float4)(0);
+; CHECK: [[CMP]] && (int4)(-1, -1, -1, -1)
+; CHECK: || (int4)(0)
+; CHECK: int4 [[CMPD:v[0-9]+]] = convert_int4({{.*}} != (double4)(0));
+; CHECK: int4 [[ANDD:v[0-9]+]] = [[CMPD]] && (int4)(-1, -1, -1, -1);
 ; CHECK: convert_long4([[ANDD]]) ?

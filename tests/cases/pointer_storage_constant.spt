@@ -27,4 +27,4 @@
                OpFunctionEnd
 ; CHECK: struct [[S:v[0-9]+]] {
 ; CHECK-NEXT: ulong m0;
-; CHECK: ((struct [[S]]){(ulong)(((ma{{[0-9]+}} global*)0)), ((uint)1)})
+; CHECK: (struct [[S]]){(ulong)(ma{{[0-9]+}} global*)0, (uint)1}

@@ -26,6 +26,6 @@
                OpReturn
                OpFunctionEnd
 ; The plain variant computes the address as integers ...
-; CHECK: = (([[MA:ma[0-9]+]] global*)((ulong)[[BASE:v[0-9]+]] + (ulong)((long)([[I:v[0-9]+]])) * sizeof(*[[BASE]])));
+; CHECK: = ([[MA:ma[0-9]+]] global*)((ulong)[[BASE:v[0-9]+]] + (ulong)(long)[[I:v[0-9]+]] * sizeof(*[[BASE]]));
 ; ... while the InBounds variant keeps C pointer arithmetic.
-; CHECK: = &[[OOB:v[0-9]+]][(long)([[I]])];
+; CHECK: = &[[OOB:v[0-9]+]][(long)[[I]]];

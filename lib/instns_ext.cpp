@@ -19,19 +19,19 @@ static std::unordered_map<OpenCLLIB::Entrypoints,
         {OpenCLLIB::Smoothstep, {"smoothstep", false}},
 };
 
-std::string
+c::expr_ref
 translator_impl::translate_extended_ternary(const Instruction &inst) const {
   auto rtype = inst.type_id();
   auto extinst =
       static_cast<OpenCLLIB::Entrypoints>(inst.GetSingleWordOperand(3));
-  auto a = inst.GetSingleWordOperand(4);
-  auto b = inst.GetSingleWordOperand(5);
-  auto c = inst.GetSingleWordOperand(6);
+  std::vector<uint32_t> args = {inst.GetSingleWordOperand(4),
+                                inst.GetSingleWordOperand(5),
+                                inst.GetSingleWordOperand(6)};
   auto fn_signed = gExtendedInstructionsTernary.at(extinst);
   if (fn_signed.second) {
-    return src_as(rtype, src_function_call_signed(fn_signed.first, a, b, c));
+    return as_type(rtype, call_signed(fn_signed.first, args));
   } else {
-    return src_function_call(fn_signed.first, a, b, c);
+    return call_values(fn_signed.first, args);
   }
 }
 
@@ -88,7 +88,7 @@ static std::unordered_map<OpenCLLIB::Entrypoints,
         {OpenCLLIB::Vload_half, {"vload_half", false}},
 };
 
-std::string
+c::expr_ref
 translator_impl::translate_extended_binary(const Instruction &inst) const {
   auto rtype = inst.type_id();
   auto extinst =
@@ -101,14 +101,14 @@ translator_impl::translate_extended_binary(const Instruction &inst) const {
   // cast just the exponent to the matching signed integer type.
   if (extinst == OpenCLLIB::Pown || extinst == OpenCLLIB::Rootn ||
       extinst == OpenCLLIB::Ldexp) {
-    return gExtendedInstructionsBinary.at(extinst).first + "(" + var_for(x) +
-           ", " + src_as_signed(y) + ")";
+    return c::call(gExtendedInstructionsBinary.at(extinst).first,
+                   {value(x), as_signed(y)});
   }
   auto fn_signed = gExtendedInstructionsBinary.at(extinst);
   if (fn_signed.second) {
-    return src_as(rtype, src_function_call_signed(fn_signed.first, x, y));
+    return as_type(rtype, call_signed(fn_signed.first, {x, y}));
   } else {
-    return src_function_call(fn_signed.first, x, y);
+    return call_values(fn_signed.first, {x, y});
   }
 }
 
@@ -178,12 +178,12 @@ static std::unordered_map<OpenCLLIB::Entrypoints, const std::string>
         {OpenCLLIB::Trunc, "trunc"},
 };
 
-std::string
+c::expr_ref
 translator_impl::translate_extended_unary(const Instruction &inst) const {
   auto extinst =
       static_cast<OpenCLLIB::Entrypoints>(inst.GetSingleWordOperand(3));
-  auto val = inst.GetSingleWordOperand(4);
-  return src_function_call(gExtendedInstructionsUnary.at(extinst), val);
+  return call_values(gExtendedInstructionsUnary.at(extinst),
+                     {inst.GetSingleWordOperand(4)});
 }
 
 bool translator_impl::translate_extended_instruction(const Instruction &inst,
@@ -191,185 +191,134 @@ bool translator_impl::translate_extended_instruction(const Instruction &inst,
   auto result = inst.result_id();
   auto instruction =
       static_cast<OpenCLLIB::Entrypoints>(inst.GetSingleWordOperand(3));
+  auto operand = [&inst](unsigned i) { return inst.GetSingleWordOperand(i); };
 
-  std::string sval;
-  bool assign_result = true;
+  c::expr_ref val;
+  // The vstore family returns nothing; it is a statement of its own.
+  c::expr_ref stmt;
 
   if (gExtendedInstructionsUnary.count(instruction)) {
-    sval = translate_extended_unary(inst);
+    val = translate_extended_unary(inst);
   } else if (gExtendedInstructionsBinary.count(instruction)) {
-    sval = translate_extended_binary(inst);
+    val = translate_extended_binary(inst);
   } else if (gExtendedInstructionsTernary.count(instruction)) {
-    sval = translate_extended_ternary(inst);
+    val = translate_extended_ternary(inst);
   } else {
     switch (instruction) {
-    case OpenCLLIB::Ctz: {
-      auto x = inst.GetSingleWordOperand(4);
+    case OpenCLLIB::Ctz:
       if (m_opencl_c_version >= 200) {
-        sval = src_function_call("ctz", x);
+        val = call_values("ctz", {operand(4)});
       } else {
         // ctz is OpenCL C 2.0. `(x & -x) - 1` sets exactly the trailing zero
         // bits, and all bits for x == 0, where ctz is the bit width. The cast
         // undoes the promotion of char and short operands to int.
-        auto vx = var_for(x);
-        sval = "popcount(" +
-               src_cast(inst.type_id(), "((" + vx + " & -" + vx + ") - 1)") +
-               ")";
+        auto x = value(operand(4));
+        auto ones = c::binary("-", c::binary("&", x, c::unary("-", x)),
+                              c::literal("1"));
+        val = c::call("popcount", {cast_to(inst.type_id(), ones)});
       }
       break;
-    }
-    case OpenCLLIB::Ilogb: {
+    case OpenCLLIB::Ilogb:
       // ilogb returns a signed intn; reinterpret to the (unsigned) result type
       // so a vector assignment type-checks (uintN = intN is not implicit).
-      auto x = inst.GetSingleWordOperand(4);
-      sval = src_as(inst.type_id(), src_function_call("ilogb", x));
+      val = as_type(inst.type_id(), call_values("ilogb", {operand(4)}));
       break;
-    }
-    case OpenCLLIB::Vloadn: {
-      auto offset = inst.GetSingleWordOperand(4);
-      auto ptr = inst.GetSingleWordOperand(5);
-      auto n = inst.GetSingleWordOperand(6);
-      sval = src_function_call("vload" + std::to_string(n), offset, ptr);
+    case OpenCLLIB::Vloadn:
+      val = call_values("vload" + std::to_string(operand(6)),
+                        {operand(4), operand(5)});
       break;
-    }
-    case OpenCLLIB::Vload_halfn: {
-      auto offset = inst.GetSingleWordOperand(4);
-      auto ptr = inst.GetSingleWordOperand(5);
-      auto n = inst.GetSingleWordOperand(6);
-      sval = src_function_call("vload_half" + std::to_string(n), offset, ptr);
+    case OpenCLLIB::Vload_halfn:
+      val = call_values("vload_half" + std::to_string(operand(6)),
+                        {operand(4), operand(5)});
       break;
-    }
-    case OpenCLLIB::Vloada_halfn: {
-      auto offset = inst.GetSingleWordOperand(4);
-      auto ptr = inst.GetSingleWordOperand(5);
-      auto n = inst.GetSingleWordOperand(6);
-      sval = src_function_call("vloada_half" + std::to_string(n), offset, ptr);
+    case OpenCLLIB::Vloada_halfn:
+      val = call_values("vloada_half" + std::to_string(operand(6)),
+                        {operand(4), operand(5)});
       break;
-    }
     case OpenCLLIB::Vstoren: {
-      auto data = inst.GetSingleWordOperand(4);
-      auto offset = inst.GetSingleWordOperand(5);
-      auto ptr = inst.GetSingleWordOperand(6);
-      assign_result = false;
-      auto n = type_for_val(data)->AsVector()->element_count();
-      src = src_function_call("vstore" + std::to_string(n), data, offset, ptr);
+      auto n = type_for_val(operand(4))->AsVector()->element_count();
+      stmt = call_values("vstore" + std::to_string(n),
+                         {operand(4), operand(5), operand(6)});
       break;
     }
-    case OpenCLLIB::Vstore_half: {
-      auto data = inst.GetSingleWordOperand(4);
-      auto offset = inst.GetSingleWordOperand(5);
-      auto ptr = inst.GetSingleWordOperand(6);
-      assign_result = false;
-      src = src_function_call("vstore_half", data, offset, ptr);
+    case OpenCLLIB::Vstore_half:
+      stmt = call_values("vstore_half", {operand(4), operand(5), operand(6)});
       break;
-    }
     case OpenCLLIB::Vstore_half_r: {
-      auto data = inst.GetSingleWordOperand(4);
-      auto offset = inst.GetSingleWordOperand(5);
-      auto ptr = inst.GetSingleWordOperand(6);
-      auto mode = inst.GetSingleWordOperand(7);
-      std::string mode_str =
-          rounding_mode(static_cast<SpvFPRoundingMode>(mode));
-      assign_result = false;
-      src = src_function_call("vstore_half_" + mode_str, data, offset, ptr);
+      auto mode = rounding_mode(static_cast<SpvFPRoundingMode>(operand(7)));
+      stmt = call_values("vstore_half_" + mode,
+                         {operand(4), operand(5), operand(6)});
       break;
     }
     case OpenCLLIB::Vstore_halfn: {
-      auto data = inst.GetSingleWordOperand(4);
-      auto offset = inst.GetSingleWordOperand(5);
-      auto ptr = inst.GetSingleWordOperand(6);
-      assign_result = false;
-      auto n = type_for_val(data)->AsVector()->element_count();
-      src = src_function_call("vstore_half" + std::to_string(n), data, offset,
-                              ptr);
+      auto n = type_for_val(operand(4))->AsVector()->element_count();
+      stmt = call_values("vstore_half" + std::to_string(n),
+                         {operand(4), operand(5), operand(6)});
       break;
     }
     case OpenCLLIB::Vstorea_halfn: {
-      auto data = inst.GetSingleWordOperand(4);
-      auto offset = inst.GetSingleWordOperand(5);
-      auto ptr = inst.GetSingleWordOperand(6);
-      assign_result = false;
-      auto n = type_for_val(data)->AsVector()->element_count();
-      src = src_function_call("vstorea_half" + std::to_string(n), data, offset,
-                              ptr);
+      auto n = type_for_val(operand(4))->AsVector()->element_count();
+      stmt = call_values("vstorea_half" + std::to_string(n),
+                         {operand(4), operand(5), operand(6)});
       break;
     }
     case OpenCLLIB::Vstorea_halfn_r: {
-      auto data = inst.GetSingleWordOperand(4);
-      auto offset = inst.GetSingleWordOperand(5);
-      auto ptr = inst.GetSingleWordOperand(6);
-      auto mode = inst.GetSingleWordOperand(7);
-      std::string mode_str =
-          rounding_mode(static_cast<SpvFPRoundingMode>(mode));
-      assign_result = false;
-      auto n = type_for_val(data)->AsVector()->element_count();
-      src =
-          src_function_call("vstorea_half" + std::to_string(n) + "_" + mode_str,
-                            data, offset, ptr);
+      auto mode = rounding_mode(static_cast<SpvFPRoundingMode>(operand(7)));
+      auto n = type_for_val(operand(4))->AsVector()->element_count();
+      stmt = call_values("vstorea_half" + std::to_string(n) + "_" + mode,
+                         {operand(4), operand(5), operand(6)});
       break;
     }
-    case OpenCLLIB::SAbs: {
-      auto val = inst.GetSingleWordOperand(4);
-      sval = src_function_call_signed("abs", val);
+    case OpenCLLIB::SAbs:
+      val = call_signed("abs", {operand(4)});
       break;
-    }
-    case OpenCLLIB::SAbs_diff: {
-      auto a = inst.GetSingleWordOperand(4);
-      auto b = inst.GetSingleWordOperand(5);
-      sval = src_function_call_signed("abs_diff", a, b);
+    case OpenCLLIB::SAbs_diff:
+      val = call_signed("abs_diff", {operand(4), operand(5)});
       break;
-    }
     case OpenCLLIB::Frexp: {
-      auto x = inst.GetSingleWordOperand(4);
-      auto exp = inst.GetSingleWordOperand(5);
-      sval = src_function_call(
-          "frexp", var_for(x) + ", " + src_cast_signed(type_id_for(exp), exp));
+      auto exp = operand(5);
+      val = c::call("frexp", {value(operand(4)),
+                              cast_to_signed(type_id_for(exp), value(exp))});
       break;
     }
     case OpenCLLIB::Lgamma_r: {
-      auto x = inst.GetSingleWordOperand(4);
-      auto signp = inst.GetSingleWordOperand(5);
-      sval = src_function_call("lgamma_r",
-                               var_for(x) + ", " +
-                                   src_cast_signed(type_id_for(signp), signp));
+      auto signp = operand(5);
+      val = c::call("lgamma_r",
+                    {value(operand(4)),
+                     cast_to_signed(type_id_for(signp), value(signp))});
       break;
     }
     case OpenCLLIB::Remquo: {
-      auto x = inst.GetSingleWordOperand(4);
-      auto y = inst.GetSingleWordOperand(5);
-      auto quo = inst.GetSingleWordOperand(6);
-      sval = src_function_call("remquo",
-                               var_for(x) + ", " + var_for(y) + ", " +
-                                   src_cast_signed(type_id_for(quo), quo));
+      auto quo = operand(6);
+      val = c::call("remquo", {value(operand(4)), value(operand(5)),
+                               cast_to_signed(type_id_for(quo), value(quo))});
       break;
     }
     case OpenCLLIB::Printf: {
-      auto format = inst.GetSingleWordOperand(4);
-      std::string format_arg;
+      auto format = operand(4);
+      c::expr_ref format_arg;
 
       // Check if we have cached string data for this variable
       auto string_literal = string_literal_for(format);
       if (string_literal) {
-        format_arg = *string_literal;
+        format_arg = c::literal(*string_literal);
       } else {
-        format_arg = var_for(format);
-        auto format_type = type_for_val(format);
-        auto ptr_type = format_type->AsPointer();
-        auto pointee_type = ptr_type->pointee_type();
+        format_arg = value(format);
+        auto pointee_type = type_for_val(format)->AsPointer()->pointee_type();
 
         // When dealing with an array, make sure to pass a pointer. Arrays are
         // struct-wrapped, so decay through the 'e' member.
         if (pointee_type->kind() == Type::Kind::kArray) {
-          format_arg = "&(" + format_arg + "->e[0])";
+          format_arg = c::address_of(
+              c::index(c::member(c::deref(format_arg), "e"), c::literal("0")));
         }
       }
 
-      std::string src_args = format_arg;
+      std::vector<c::expr_ref> args = {format_arg};
       for (unsigned op = 5; op < inst.NumOperands(); op++) {
-        auto arg = inst.GetSingleWordOperand(op);
-        src_args += ", " + var_for(arg);
+        args.push_back(value(operand(op)));
       }
-      sval = src_function_call("printf", src_args);
+      val = c::call("printf", std::move(args));
       break;
     }
     default:
@@ -379,8 +328,10 @@ bool translator_impl::translate_extended_instruction(const Instruction &inst,
     }
   }
 
-  if ((result != 0) && assign_result) {
-    src = src_var_decl(result) + " = " + sval;
+  if (stmt) {
+    src = c::print(stmt);
+  } else if (result != 0) {
+    src = src_var_decl(result) + " = " + c::print(val);
   }
 
   return true;

@@ -21,5 +21,5 @@
                OpAtomicStore %p %scope %sem %v
                OpReturn
                OpFunctionEnd
-; CHECK: atomic_load((volatile global atomic_uint*)(
-; CHECK: atomic_store((volatile global atomic_uint*)(
+; CHECK: atomic_load((volatile global atomic_uint*)
+; CHECK: atomic_store((volatile global atomic_uint*)

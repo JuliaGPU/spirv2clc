@@ -24,4 +24,4 @@
                OpReturn
                OpFunctionEnd
 ; CHECK: typedef arr{{[0-9]+}} __attribute__((may_alias)) [[MA:ma[0-9]+]];
-; CHECK: [[MA]] global* {{v[0-9]+}} = (([[MA]] global*)((ulong)[[BASE:v[0-9]+]] + (ulong)({{.*}}) * sizeof(*[[BASE]])));
+; CHECK: [[MA]] global* {{v[0-9]+}} = ([[MA]] global*)((ulong)[[BASE:v[0-9]+]] + (ulong){{.*}} * sizeof(*[[BASE]]));

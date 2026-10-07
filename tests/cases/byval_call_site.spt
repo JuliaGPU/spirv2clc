@@ -31,4 +31,4 @@
 ; Callee takes the struct by value and the second arg by pointer:
 ; CHECK: void {{[A-Za-z0-9_]+}}(struct {{[A-Za-z0-9_]+}} {{[A-Za-z0-9_]+}}_value, ma{{[0-9]+}} global*
 ; Call site dereferences only the by-value argument:
-; CHECK: {{[A-Za-z0-9_]+}}((*{{[A-Za-z0-9_]+}}),
+; CHECK: {{[A-Za-z0-9_]+}}(*{{[A-Za-z0-9_]+}},

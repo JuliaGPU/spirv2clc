@@ -32,7 +32,7 @@
                OpStore %out %sel
                OpReturn
                OpFunctionEnd
-; CHECK: = {((uint)0), ((uint)1)};
+; CHECK: = {(uint)0, (uint)1};
 ; CHECK: = {{.*}}.m0;
 ; CHECK: = {{.*}}.m1;
 ; CHECK: {{.*}}.m1 = {{.*}};

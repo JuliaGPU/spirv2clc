@@ -74,8 +74,8 @@
 ; CHECK: int4 m;
 ; CHECK-NEXT: int4 m_phi;
 ; CHECK: int4 lt = convert_int4(
-; CHECK: m == ((int4)(-1, -1, -1, -1))
-; CHECK: ((int4)(-1, -1, -1, -1)) ?
+; CHECK: m == (int4)(-1, -1, -1, -1);
+; CHECK: = (int4)(-1, -1, -1, -1) ?
 ; CHECK: bool [[EXT:v[0-9]+]] = m.s1;
-; CHECK: = {-(int)([[BOTH:v[0-9]+]]), -(int)([[BOTH]]),
-; CHECK: .s1 = -(int)(false);
+; CHECK: = {-(int)[[BOTH:v[0-9]+]], -(int)[[BOTH]],
+; CHECK: .s1 = -(int)false;

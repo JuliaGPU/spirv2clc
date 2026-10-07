@@ -1,25 +1,25 @@
-std::string translator_impl::src_to_component(uint32_t composite_tyid,
-                                              uint32_t elem_tyid,
-                                              const std::string &value) const {
+c::expr_ref translator_impl::to_component(uint32_t composite_tyid,
+                                          uint32_t elem_tyid,
+                                          c::expr_ref value) const {
   auto composite = type_for(composite_tyid)->kind();
   if (composite == Type::Kind::kVector &&
       type_for(elem_tyid)->kind() == Type::Kind::kBool) {
-    return "-(int)(" + value + ")";
+    return c::unary("-", c::cast("int", std::move(value)));
   }
   if (composite == Type::Kind::kStruct || composite == Type::Kind::kArray) {
-    return src_to_storage(elem_tyid, value);
+    return to_storage(elem_tyid, std::move(value));
   }
   return value;
 }
 
-std::string
-translator_impl::src_from_component(uint32_t composite_tyid, uint32_t elem_tyid,
-                                    const std::string &component) const {
+c::expr_ref translator_impl::from_component(uint32_t composite_tyid,
+                                            uint32_t elem_tyid,
+                                            c::expr_ref component) const {
   // A mask element (-1 or 0) needs no conversion: it is only ever used to
   // initialize a bool, which normalizes it.
   auto composite = type_for(composite_tyid)->kind();
   if (composite == Type::Kind::kStruct || composite == Type::Kind::kArray) {
-    return src_from_storage(elem_tyid, component);
+    return from_storage(elem_tyid, std::move(component));
   }
   return component;
 }
@@ -31,27 +31,28 @@ std::string translator_impl::src_storage_type(uint32_t tyid) const {
   return src_type(tyid);
 }
 
-std::string translator_impl::src_to_storage(uint32_t tyid,
-                                            const std::string &value) const {
+c::expr_ref translator_impl::to_storage(uint32_t tyid,
+                                        c::expr_ref value) const {
   if (type_for(tyid)->kind() == Type::Kind::kPointer) {
-    return "(" + src_storage_type(tyid) + ")(" + value + ")";
+    return c::cast(src_storage_type(tyid), std::move(value));
   }
   return value;
 }
 
-std::string translator_impl::src_from_storage(uint32_t tyid,
-                                              const std::string &stored) const {
+c::expr_ref translator_impl::from_storage(uint32_t tyid,
+                                          c::expr_ref stored) const {
   if (type_for(tyid)->kind() == Type::Kind::kPointer) {
-    return "((" + src_type(tyid) + ")" + stored + ")";
+    return cast_to(tyid, std::move(stored));
   }
   return stored;
 }
 
-bool translator_impl::src_composite_path(const spvtools::opt::Instruction &inst,
-                                         unsigned first, uint32_t tyid,
-                                         std::string &path, uint32_t &leaf_tyid,
-                                         uint32_t &parent_tyid) const {
-  path.clear();
+bool translator_impl::composite_member(const spvtools::opt::Instruction &inst,
+                                       unsigned first, uint32_t tyid,
+                                       c::expr_ref base, c::expr_ref &member,
+                                       uint32_t &leaf_tyid,
+                                       uint32_t &parent_tyid) const {
+  member = std::move(base);
   parent_tyid = 0;
   for (unsigned i = first; i < inst.NumOperands(); i++) {
     parent_tyid = tyid;
@@ -61,17 +62,18 @@ bool translator_impl::src_composite_path(const spvtools::opt::Instruction &inst,
     case Type::Kind::kVector: {
       std::stringstream scomp;
       scomp << std::hex << idx;
-      path += ".s" + scomp.str();
+      member = c::member(member, "s" + scomp.str());
       tyid = type_id_for(type->AsVector()->element_type());
       break;
     }
     case Type::Kind::kArray:
       // Arrays are struct-wrapped; index through the 'e' member.
-      path += ".e[" + std::to_string(idx) + "]";
+      member =
+          c::index(c::member(member, "e"), c::literal(std::to_string(idx)));
       tyid = type_id_for(type->AsArray()->element_type());
       break;
     case Type::Kind::kStruct:
-      path += ".m" + std::to_string(idx);
+      member = c::member(member, "m" + std::to_string(idx));
       tyid = type_id_for(type->AsStruct()->element_types()[idx]);
       break;
     default:
@@ -368,7 +370,7 @@ bool translator_impl::translate_type(const Instruction &inst) {
     // Declare the structure type. Pointer leaves are encoded as integers (see
     // src_storage_type), as OpenCL forbids pointers in aggregates.
     auto &os = m_out.types;
-    os << "struct " + var_for(result) + " {" << std::endl;
+    os << "struct " + name_of(result) + " {" << std::endl;
     for (uint32_t opidx = 1; opidx < inst.NumOperands(); opidx++) {
       auto mid = inst.GetSingleWordOperand(opidx);
       os << "  " << src_storage_type(mid) << " m" << std::to_string(opidx - 1)
@@ -381,7 +383,7 @@ bool translator_impl::translate_type(const Instruction &inst) {
     os << ";" << std::endl;
 
     // Prepare the type name
-    typestr = "struct " + var_for(result);
+    typestr = "struct " + name_of(result);
     break;
   }
   case spv::Op::OpTypeArray: {
@@ -519,12 +521,13 @@ bool translator_impl::translate_types_values() {
       case Type::Kind::kInteger: {
         auto tint = type->AsInteger();
         if (tint->width() <= 32) {
-          m_literals[result] = src_cast(rtype, std::to_string(op_val.words[0]));
+          m_bindings[result] =
+              cast_to(rtype, c::literal(std::to_string(op_val.words[0])));
         } else if (tint->width() == 64) {
           uint64_t w0 = op_val.words[0];
           uint64_t w1 = op_val.words[1];
           auto w = w1 << 32 | w0;
-          m_literals[result] = src_cast(rtype, std::to_string(w));
+          m_bindings[result] = cast_to(rtype, c::literal(std::to_string(w)));
         } else {
           std::cerr << "UNIMPLEMENTED integer constant width " << tint->width()
                     << std::endl;
@@ -533,67 +536,49 @@ bool translator_impl::translate_types_values() {
         break;
       }
       case Type::Kind::kFloat: {
-        auto tfloat = type->AsFloat();
-        auto width = tfloat->width();
+        auto width = type->AsFloat()->width();
+        double val;
         std::ostringstream out;
         if (width == 16) {
-          uint32_t w0 = op_val.words[0];
-          cl_half h = w0 & 0xFFFF;
-          float val = cl_half_to_float(h);
-          // INFINITY/NAN are float macros; cast to half (the "infh"/"nanh" that
-          // a plain "<< val << \"h\"" would spell is not a valid literal).
-          if (std::isinf(val)) {
-            if (std::signbit(val)) {
-              out << "-";
-            }
-            out << "(half)INFINITY";
-          } else if (std::isnan(val)) {
-            out << "(half)NAN";
-          } else {
-            out.precision(11);
-            out << std::fixed << val << "h";
-          }
+          val = cl_half_to_float(op_val.words[0] & 0xFFFF);
+          out.precision(11);
+          out << std::fixed << val << "h";
         } else if (width == 32) {
           uint32_t w0 = op_val.words[0];
-          float val;
-          std::memcpy(&val, &w0, sizeof(val));
-          if (std::isinf(val)) {
-            if (std::signbit(val)) {
-              out << "-";
-            }
-            out << "INFINITY";
-          } else if (std::isnan(val)) {
-            out << "NAN";
-          } else {
-            out.precision(24);
-            out << std::fixed << val << "f";
-          }
+          float f;
+          std::memcpy(&f, &w0, sizeof(f));
+          val = f;
+          out.precision(24);
+          out << std::fixed << f << "f";
         } else if (width == 64) {
           uint64_t w0 = op_val.words[0];
           uint64_t w1 = op_val.words[1];
           auto w = w1 << 32 | w0;
-          double val;
           std::memcpy(&val, &w, sizeof(val));
-          // NAN/INFINITY are float macros; cast to double so double-typed uses
-          // (e.g. copysign(0.0, (double)NAN)) aren't ambiguous against the float
-          // overloads.
-          if (std::isinf(val)) {
-            if (std::signbit(val)) {
-              out << "-";
-            }
-            out << "(double)INFINITY";
-          } else if (std::isnan(val)) {
-            out << "(double)NAN";
-          } else {
-            out.precision(53);
-            out << std::fixed << val;
-          }
+          out.precision(53);
+          out << std::fixed << val;
         } else {
           std::cerr << "UNIMPLEMENTED float constant width " << width
                     << std::endl;
           return false;
         }
-        m_literals[result] = out.str();
+        if (std::isinf(val) || std::isnan(val)) {
+          // INFINITY/NAN are float macros. Cast them to the constant's type:
+          // for half there is no literal to spell ("infh" is not one), and
+          // for double the cast keeps double-typed uses (e.g.
+          // copysign(0.0, (double)NAN)) from being ambiguous against the
+          // float overloads.
+          auto special = c::literal(std::isinf(val) ? "INFINITY" : "NAN");
+          if (width != 32) {
+            special = cast_to(rtype, special);
+          }
+          if (std::isinf(val) && std::signbit(val)) {
+            special = c::unary("-", special);
+          }
+          m_bindings[result] = special;
+        } else {
+          m_bindings[result] = c::literal(out.str());
+        }
         break;
       }
       default:
@@ -604,28 +589,21 @@ bool translator_impl::translate_types_values() {
       break;
     }
     case spv::Op::OpUndef:
-    case spv::Op::OpConstantNull: {
-      std::string cst;
-      if (!get_null_constant(rtype, cst)) {
-        return false;
-      }
-      m_literals[result] = cst;
+    case spv::Op::OpConstantNull:
+      m_bindings[result] = null_constant(rtype);
       break;
-    }
-    case spv::Op::OpConstantTrue: {
-      m_literals[result] = "true";
+    case spv::Op::OpConstantTrue:
+      m_bindings[result] = c::literal("true");
       break;
-    }
-    case spv::Op::OpConstantFalse: {
-      m_literals[result] = "false";
+    case spv::Op::OpConstantFalse:
+      m_bindings[result] = c::literal("false");
       break;
-    }
     case spv::Op::OpConstantSampler: {
       auto addressing_mode = inst.GetSingleWordOperand(2);
       auto normalised = inst.GetSingleWordOperand(3);
       auto filter_mode = inst.GetSingleWordOperand(4);
       auto &os = m_out.globals;
-      os << "constant sampler_t " << var_for(result) << " = ";
+      os << "constant sampler_t " << name_of(result) << " = ";
       switch (addressing_mode) {
       case SpvSamplerAddressingModeClampToEdge:
         os << "CLK_ADDRESS_CLAMP_TO_EDGE";
@@ -669,66 +647,33 @@ bool translator_impl::translate_types_values() {
     }
     case spv::Op::OpConstantComposite: {
       auto type = type_for(rtype);
-      std::string lit;
+      std::vector<c::expr_ref> elems;
+      auto defuse = m_ir->get_def_use_mgr();
+      for (uint32_t opidx = 2; opidx < inst.NumOperands(); opidx++) {
+        auto eid = inst.GetSingleWordOperand(opidx);
+        if (type->kind() == Type::Kind::kVector &&
+            type->AsVector()->element_type()->kind() == Type::Kind::kBool) {
+          // A mask; see src_type.
+          bool set = defuse->GetDef(eid)->opcode() == spv::Op::OpConstantTrue;
+          elems.push_back(c::literal(set ? "-1" : "0"));
+        } else {
+          elems.push_back(to_component(rtype, type_id_for(eid), value(eid)));
+        }
+      }
       switch (type->kind()) {
-      case Type::Kind::kVector: {
-        auto tvec = type->AsVector();
-        bool mask = tvec->element_type()->kind() == Type::Kind::kBool;
-        auto defuse = m_ir->get_def_use_mgr();
-        // ((type)(c0, c1, ..., cN))
-        lit = "((" + src_type(rtype) + ")(";
-        const char *sep = "";
-        for (uint32_t opidx = 2; opidx < tvec->element_count() + 2; opidx++) {
-          auto cid = inst.GetSingleWordOperand(opidx);
-          lit += sep;
-          if (mask) {
-            bool set = defuse->GetDef(cid)->opcode() == spv::Op::OpConstantTrue;
-            lit += set ? "-1" : "0";
-          } else {
-            lit += var_for(cid);
-          }
-          sep = ", ";
-        }
-        lit += "))";
-        m_literals[result] = lit;
+      case Type::Kind::kVector:
+        m_bindings[result] = c::vector_literal(src_type(rtype), elems);
         break;
-      }
-      case Type::Kind::kStruct: {
-        auto tstruct = type->AsStruct();
-        // ((type){m0, m1, ..., mN})
-        lit = "((" + src_type(rtype) + "){";
-        const char *sep = "";
-        for (uint32_t opidx = 2; opidx < tstruct->element_types().size() + 2;
-             opidx++) {
-          auto mid = inst.GetSingleWordOperand(opidx);
-          lit += sep;
-          lit += src_to_storage(type_id_for(mid), var_for(mid));
-          sep = ", ";
-        }
-        lit += "})";
-        m_literals[result] = lit;
+      case Type::Kind::kStruct:
+        m_bindings[result] = c::compound_literal(src_type(rtype), elems);
         break;
-      }
-      case Type::Kind::kArray: {
+      case Type::Kind::kArray:
         // Array types are wrapped in a struct, so the initializer is
-        // ((arrN){{ e0, e1, ... }}): outer braces for the wrapper, inner for
-        // the element array member 'e'.
-        uint32_t num_elems = array_type_get_length(rtype);
-        if (num_elems == 0) {
-            return false;
-        }
-        lit = "((" + src_type(rtype) + "){{";
-        const char *sep = "";
-        for (uint32_t opidx = 2; opidx < num_elems + 2; opidx++) {
-          auto mid = inst.GetSingleWordOperand(opidx);
-          lit += sep;
-          lit += src_to_storage(type_id_for(mid), var_for(mid));
-          sep = ", ";
-        }
-        lit += "}})";
-        m_literals[result] = lit;
+        // (arrN){{e0, e1, ...}}: outer braces for the wrapper, inner for the
+        // element array member 'e'.
+        m_bindings[result] =
+            c::compound_literal(src_type(rtype), {c::init_list(elems)});
         break;
-      }
       default:
         std::cerr << "UNIMPLEMENTED OpConstantComposite type " << type->kind()
                   << std::endl;
@@ -748,7 +693,8 @@ bool translator_impl::translate_types_values() {
       case spv::Op::OpConvertUToPtr:
       case spv::Op::OpConvertPtrToU: {
         // The result type already carries the destination type/address space.
-        m_literals[result] = src_cast(rtype, inst.GetSingleWordOperand(3));
+        m_bindings[result] =
+            cast_to(rtype, value(inst.GetSingleWordOperand(3)));
         break;
       }
       case spv::Op::OpPtrAccessChain:
@@ -763,8 +709,8 @@ bool translator_impl::translate_types_values() {
         }
         auto base = inst.GetSingleWordOperand(3);
         auto index = inst.GetSingleWordOperand(4);
-        m_literals[result] = src_cast(
-            rtype, "(" + var_for(base) + " + " + var_for(index) + ")");
+        m_bindings[result] =
+            cast_to(rtype, c::binary("+", value(base), value(index)));
         break;
       }
       default:
@@ -795,16 +741,16 @@ bool translator_impl::translate_types_values() {
 
       if (storage == SpvStorageClassWorkgroup) {
         // Mirror the function-local OpVariable pattern: declare the storage and
-        // a pointer to it, so var_for() is a pointer. Array types are
-        // struct-wrapped (no array-to-pointer decay), so the variable can't be
-        // used directly as a pointer the way a bare local array used to be.
+        // a pointer to it, so the variable's value is a pointer. Array types
+        // are struct-wrapped (no array-to-pointer decay), so the variable can't
+        // be used directly as a pointer the way a bare local array used to be.
         auto &storagename = derived_name(result, "_storage");
         std::string local_var_decl =
             "local " +
             src_type_memory_object_declaration(typointeeid, result,
                                                storagename) +
-            "; " + src_type(rtype) + " " + var_for(result) + " = &" +
-            storagename;
+            "; " + src_var_decl(result) + " = " +
+            c::print(c::address_of(c::name(storagename)));
         m_local_variable_decls[result] = local_var_decl;
       } else if (storage == SpvStorageClassUniformConstant) {
         // Check if initializer is a string array and cache it for later use
@@ -830,10 +776,10 @@ bool translator_impl::translate_types_values() {
                                                             storagename);
         if (inst.NumOperands() > 3) {
           auto init = inst.GetSingleWordOperand(3);
-          m_out.globals << " = " << var_for(init);
+          m_out.globals << " = " << c::print(value(init));
         }
         m_out.globals << ";" << std::endl;
-        m_literals[result] = "(&" + storagename + ")";
+        m_bindings[result] = c::address_of(c::name(storagename));
       } else if (storage == SpvStorageClassCrossWorkgroup) {
         // Program-scope global variable. Legal only from OpenCL C 2.0 on; below
         // that, program-scope variables must live in the constant address space.
@@ -851,10 +797,10 @@ bool translator_impl::translate_types_values() {
                                                             storagename);
         if (inst.NumOperands() > 3) {
           auto init = inst.GetSingleWordOperand(3);
-          m_out.globals << " = " << var_for(init);
+          m_out.globals << " = " << c::print(value(init));
         }
         m_out.globals << ";" << std::endl;
-        m_literals[result] = "(&" + storagename + ")";
+        m_bindings[result] = c::address_of(c::name(storagename));
       } else {
         std::cerr << "UNIMPLEMENTED global variable with storage class "
                   << storage << std::endl;

@@ -41,10 +41,10 @@
                OpReturn
                OpFunctionEnd
 ; CHECK: uint s_storage_1; {{.*}} s = &s_storage_1;
-; CHECK: uint x = v{{[0-9]+}} + ((uint)1);
-; CHECK-NEXT: uint x_1 = x + ((uint)1);
-; CHECK-NEXT: uint v9 = x_1 + ((uint)1);
-; CHECK-NEXT: uint kernel_1 = v9 + ((uint)1);
-; CHECK-NEXT: uint s_storage = kernel_1 + ((uint)1);
+; CHECK: uint x = v{{[0-9]+}} + (uint)1;
+; CHECK-NEXT: uint x_1 = x + (uint)1;
+; CHECK-NEXT: uint v9 = x_1 + (uint)1;
+; CHECK-NEXT: uint kernel_1 = v9 + (uint)1;
+; CHECK-NEXT: uint s_storage = kernel_1 + (uint)1;
 ; CHECK: *s = s_storage;
 ; CHECK: for (ulong _i_1 = 0; _i_1 < _i; ++_i_1)

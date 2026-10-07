@@ -28,7 +28,7 @@
                OpStore %out %e1
                OpReturn
                OpFunctionEnd
-; CHECK: = {{[{][{]}}((uint)0), ((uint)1){{[}][}]}};
+; CHECK: = {{[{][{]}}(uint)0, (uint)1{{[}][}]}};
 ; CHECK: = {{.*}}.e[0];
 ; CHECK: {{.*}}.e[1] = {{.*}};
 ; CHECK: = {{.*}}.e[1];

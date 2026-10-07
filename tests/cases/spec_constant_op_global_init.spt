@@ -26,4 +26,4 @@
                OpReturn
                OpFunctionEnd
 ; CHECK: typedef uchar __attribute__((may_alias)) [[UC:ma[0-9]+]];
-; CHECK: global [[UC]] global* {{[A-Za-z0-9_]+}} = (([[UC]] global*)(([[UC]] generic*)0));
+; CHECK: global [[UC]] global* {{[A-Za-z0-9_]+}} = ([[UC]] global*)([[UC]] generic*)0;

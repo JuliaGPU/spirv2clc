@@ -33,8 +33,8 @@
                OpStore %pl %tl
                OpReturn
                OpFunctionEnd
-; CL12: uchar {{v[0-9]+}} = popcount(((uchar)(([[C:v[0-9]+]] & -[[C]]) - 1)));
-; CL12: uint {{v[0-9]+}} = popcount(((uint)(([[X:v[0-9]+]] & -[[X]]) - 1)));
-; CL12: ulong {{v[0-9]+}} = popcount(((ulong)(([[L:v[0-9]+]] & -[[L]]) - 1)));
+; CL12: uchar {{v[0-9]+}} = popcount((uchar)(([[C:v[0-9]+]] & -[[C]]) - 1));
+; CL12: uint {{v[0-9]+}} = popcount((uint)(([[X:v[0-9]+]] & -[[X]]) - 1));
+; CL12: ulong {{v[0-9]+}} = popcount((ulong)(([[L:v[0-9]+]] & -[[L]]) - 1));
 ; CL30: uchar {{v[0-9]+}} = ctz({{v[0-9]+}});
 ; CL30: ulong {{v[0-9]+}} = ctz({{v[0-9]+}});

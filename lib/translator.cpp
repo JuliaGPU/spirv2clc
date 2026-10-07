@@ -587,7 +587,7 @@ const std::string &translator_impl::derived_name(uint32_t id,
   auto it = m_derived_names.find(key);
   if (it == m_derived_names.end()) {
     it = m_derived_names
-             .emplace(key, m_name_allocator.allocate(var_for(id) + suffix))
+             .emplace(key, m_name_allocator.allocate(name_of(id) + suffix))
              .first;
   }
   return it->second;
@@ -683,7 +683,7 @@ void translator_impl::emit_function_signature(Function &func,
     }
     os << m_entry_points.at(result);
   } else {
-    os << var_for(result);
+    os << name_of(result);
   }
   os << "(";
   std::string sep = "";
@@ -719,7 +719,7 @@ void translator_impl::emit_function_signature(Function &func,
       for (auto wgvar : it->second) {
         os << sep;
         os << src_type(defuse->GetDef(wgvar)->type_id()) << " "
-           << var_for(wgvar);
+           << name_of(wgvar);
         sep = ", ";
       }
     }
@@ -825,7 +825,7 @@ bool translator_impl::translate_function(Function &func) {
   func.ForEachParam([this, &os](const Instruction *inst) {
     auto result = inst->result_id();
     if (m_byval_params.count(result)) {
-      os << "  " << src_type(inst->type_id()) << " " << var_for(result)
+      os << "  " << src_type(inst->type_id()) << " " << name_of(result)
          << " = &" << derived_name(result, "_value") << ";\n";
     }
   });
@@ -834,13 +834,13 @@ bool translator_impl::translate_function(Function &func) {
     for (auto phival : m_phi_vals.at(&func)) {
       auto phitype = type_id_for(phival);
       // Separate declarations: `T *a, b` would not make b a pointer.
-      os << "  " << src_type(phitype) << " " << var_for(phival) << ";\n";
+      os << "  " << src_type(phitype) << " " << name_of(phival) << ";\n";
       os << "  " << src_type(phitype) << " " << derived_name(phival, "_phi")
          << ";\n";
     }
   }
   for (auto &bb : func) {
-    os << var_for(bb.id()) + ":;" << std::endl;
+    os << name_of(bb.id()) + ":;" << std::endl;
     // Translate all instructions except the terminator. The phis lead the
     // block; each commits the value staged by the predecessor we came from.
     for (auto &inst : bb) {
@@ -848,7 +848,7 @@ bool translator_impl::translate_function(Function &func) {
         break;
       }
       if (inst.opcode() == spv::Op::OpPhi) {
-        os << "  " << var_for(inst.result_id()) << " = "
+        os << "  " << name_of(inst.result_id()) << " = "
            << derived_name(inst.result_id(), "_phi") << ";\n";
         continue;
       }
@@ -866,7 +866,7 @@ bool translator_impl::translate_function(Function &func) {
     if (m_phi_assigns.count(&bb)) {
       for (auto &phival_var : m_phi_assigns.at(&bb)) {
         os << "  " << derived_name(phival_var.first, "_phi") << " = "
-           << var_for(phival_var.second) << ";\n";
+           << c::print(value(phival_var.second)) << ";\n";
       }
     }
 
