@@ -472,8 +472,15 @@ bool translator::translate_instruction(const Instruction &inst,
     };
     auto ptr = inst.GetSingleWordOperand(2);
     auto val = inst.GetSingleWordOperand(5);
-    sval = src_function_call(atomic_builtin(fns.at(opcode), ptr), ptr,
-                             val); // FIXME exact semantics
+    auto fn = atomic_builtin(fns.at(opcode), ptr);
+    if (opcode == spv::Op::OpAtomicSMax || opcode == spv::Op::OpAtomicSMin) {
+      // Integers are spelled unsigned, so the signed comparison needs the
+      // signed overload: reinterpret the operands and convert the result back.
+      sval = src_as(rtype, fn + "(" + src_cast_signed(type_id_for(ptr), ptr) +
+                               ", " + src_as_signed(val) + ")");
+    } else {
+      sval = src_function_call(fn, ptr, val); // FIXME exact semantics
+    }
     break;
   }
   case spv::Op::OpAtomicCompareExchange: {
