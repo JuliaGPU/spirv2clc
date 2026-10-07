@@ -357,42 +357,27 @@ std::unordered_set<std::string> gReservedIdentifiers = {
     "pipe",
 };
 
-bool translator_impl::is_valid_identifier(const std::string &name) const {
-  // Check the name isn't already used
-  for (auto it = m_names.begin(); it != m_names.end(); ++it) {
-    if (it->second == name) {
-        return false;
+std::string name_allocator::allocate(const std::string &hint) {
+  // Map anything that isn't a letter, digit or underscore to '_' (e.g. Julia
+  // names like "a::CLDeviceArray"), and avoid a leading digit.
+  std::string base = hint.empty() ? "v" : hint;
+  for (auto &ch : base) {
+    bool valid = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                 (ch >= '0' && ch <= '9') || ch == '_';
+    if (!valid) {
+      ch = '_';
     }
   }
-
-  // Check the name is not a reserved identifier
-  return gReservedIdentifiers.count(name) == 0;
-}
-
-std::string
-translator_impl::make_valid_identifier(const std::string &name) const {
-  std::string newname = name;
-
-  bool is_valid = is_valid_identifier(newname);
-  if (!is_valid) {
-    newname += "_MADE_VALID_CLC_IDENT";
+  if (base[0] >= '0' && base[0] <= '9') {
+    base = "_" + base;
   }
-
-  is_valid = is_valid_identifier(newname);
-
-  int name_iter = 1;
-  while(!is_valid) {
-    std::string candidate = newname + std::to_string(name_iter);
-    is_valid = is_valid_identifier(candidate);
-    if (!is_valid) {
-      name_iter++;
-    } else {
-      newname = candidate;
-      break;
-    }
+  auto name = base;
+  for (unsigned n = 1; m_used.count(name) || gReservedIdentifiers.count(name);
+       n++) {
+    name = base + "_" + std::to_string(n);
   }
-
-  return newname;
+  m_used.insert(name);
+  return name;
 }
 
 std::optional<std::string> translator_impl::get_string_literal(

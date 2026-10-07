@@ -119,7 +119,7 @@ std::string translator_impl::fence_flags(uint32_t mem_sem) const {
 }
 
 std::string translator_impl::src_dereference(uint32_t ptr,
-                                             const MemoryAccess &access) const {
+                                             const MemoryAccess &access) {
   auto ptrty = type_for_val(ptr)->AsPointer();
   auto pointee = m_ir->get_type_mgr()->GetId(ptrty->pointee_type());
   bool vol = access.mask & SpvMemoryAccessVolatileMask;
@@ -216,8 +216,7 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     // auto storage = inst.GetSingleWordOperand(2); TODO make storage explicit?
     assign_result = false;
     auto varty = type_for(rtype)->AsPointer()->pointee_type();
-    auto storagename = var_for(result) + "_storage";
-    storagename = make_valid_identifier(storagename);
+    auto &storagename = derived_name(result, "_storage");
     // Declare storage
     auto tymgr = m_ir->get_type_mgr();
     src = src_type_memory_object_declaration(tymgr->GetId(varty), result,
@@ -298,9 +297,13 @@ bool translator_impl::translate_instruction(const Instruction &inst,
         static_cast<uint32_t>(type_for_val(target)->AsPointer()->storage_class()));
     auto src_as = address_space_qualifier(
         static_cast<uint32_t>(type_for_val(source)->AsPointer()->storage_class()));
-    src = "for (ulong _i = 0; _i < " + var_for(size) + "; ++_i) ((" + tgt_vol +
-          "uchar " + tgt_as + "*)(" + var_for(target) + "))[_i] = ((" +
-          src_vol + "uchar " + src_as + "*)(" + var_for(source) + "))[_i]";
+    // The counter is allocated like any other name, so that an operand can't
+    // be shadowed by it.
+    auto i = m_name_allocator.allocate("_i");
+    src = "for (ulong " + i + " = 0; " + i + " < " + var_for(size) + "; ++" +
+          i + ") ((" + tgt_vol + "uchar " + tgt_as + "*)(" + var_for(target) +
+          "))[" + i + "] = ((" + src_vol + "uchar " + src_as + "*)(" +
+          var_for(source) + "))[" + i + "]";
     break;
   }
   case spv::Op::OpConvertPtrToU:

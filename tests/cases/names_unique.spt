@@ -1,0 +1,50 @@
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+; Identifiers are unique across the program: two values sharing an OpName, a
+; name spelling a generated one ("v9" for an unnamed id 9 elsewhere), names that
+; are C or OpenCL C keywords, and the derived storage name of a variable whose
+; obvious spelling is taken, and the counter of a byte-copy loop whose size is
+; named like it, all get distinct identifiers.
+               OpCapability Addresses
+               OpCapability Kernel
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k"
+               OpName %x1 "x"
+               OpName %x2 "x"
+               OpName %named_v9 "v9"
+               OpName %kw "kernel"
+               OpName %var "s"
+               OpName %taken "s_storage"
+               OpName %sz "_i"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+        %ptr = OpTypePointer CrossWorkgroup %uint
+       %fptr = OpTypePointer Function %uint
+         %fn = OpTypeFunction %void %ptr %uint %uint
+     %uint_1 = OpConstant %uint 1
+          %k = OpFunction %void None %fn
+        %out = OpFunctionParameter %ptr
+          %n = OpFunctionParameter %uint
+         %sz = OpFunctionParameter %uint
+      %entry = OpLabel
+        %var = OpVariable %fptr Function
+       %copy = OpVariable %fptr Function
+         %x1 = OpIAdd %uint %n %uint_1
+         %x2 = OpIAdd %uint %x1 %uint_1
+   %named_v9 = OpIAdd %uint %x2 %uint_1
+         %kw = OpIAdd %uint %named_v9 %uint_1
+      %taken = OpIAdd %uint %kw %uint_1
+               OpStore %var %taken
+         %ld = OpLoad %uint %var
+               OpStore %out %ld
+               OpCopyMemorySized %copy %var %sz
+               OpReturn
+               OpFunctionEnd
+; CHECK: uint s_storage_1; {{.*}} s = &s_storage_1;
+; CHECK: uint x = v{{[0-9]+}} + ((uint)1);
+; CHECK-NEXT: uint x_1 = x + ((uint)1);
+; CHECK-NEXT: uint v9 = x_1 + ((uint)1);
+; CHECK-NEXT: uint kernel_1 = v9 + ((uint)1);
+; CHECK-NEXT: uint s_storage = kernel_1 + ((uint)1);
+; CHECK: *s = s_storage;
+; CHECK: for (ulong _i_1 = 0; _i_1 < _i; ++_i_1)

@@ -116,14 +116,16 @@ void translator_impl::declare_pointee_alias(uint32_t tyid) {
     m_pointee_aliases[tyid] = src_type(tyid);
     return;
   }
-  std::string name = "ma" + std::to_string(tyid);
-  m_src << "typedef " << src_type(tyid) << " __attribute__((may_alias)) "
-        << name << ";" << std::endl;
+  auto name = m_name_allocator.allocate("ma" + std::to_string(tyid));
+  m_out.types << "typedef " << src_type(tyid) << " __attribute__((may_alias)) "
+              << name << ";" << std::endl;
   m_pointee_aliases[tyid] = name;
   if (m_types_signed.count(tyid)) {
-    m_src << "typedef " << src_type_signed(tyid)
-          << " __attribute__((may_alias)) " << name << "s;" << std::endl;
-    m_pointee_aliases_signed[tyid] = name + "s";
+    auto signed_name = m_name_allocator.allocate(name + "s");
+    m_out.types << "typedef " << src_type_signed(tyid)
+                << " __attribute__((may_alias)) " << signed_name << ";"
+                << std::endl;
+    m_pointee_aliases_signed[tyid] = signed_name;
   }
 }
 
@@ -196,7 +198,8 @@ bool translator_impl::is_underaligned(uint32_t tyid,
          access.alignment < natural_alignment(tyid);
 }
 
-void translator_impl::declare_underaligned_aliases() {
+std::string translator_impl::underaligned_alias(uint32_t tyid,
+                                                uint32_t alignment) {
   // A C dereference asserts the pointee's natural alignment, but a SPIR-V
   // access can promise less (an Aligned memory operand below the type's
   // natural alignment -- e.g. an i64 load of a 4-aligned pair of floats
@@ -205,57 +208,26 @@ void translator_impl::declare_underaligned_aliases() {
   // accesses are dereferenced through a reduced-alignment typedef instead --
   // only a typedef can lower alignment in C -- built on top of the pointee's
   // may_alias alias so both properties hold at once.
-  auto mint = [this](const Instruction &inst, uint32_t tyid,
-                     unsigned index) -> MemoryAccess {
-    auto access = memory_access_operands(inst, index);
-    if (!is_underaligned(tyid, access)) {
-      return access;
-    }
-    auto key = std::make_pair(tyid, access.alignment);
-    if (m_underaligned_aliases.count(key)) {
-      return access;
-    }
-    // Every pointee reached by a load/store has an OpTypePointer, so its
-    // may_alias alias exists (and is a real typedef: non-dereferenceable
-    // kinds are filtered out by their natural alignment of 1 above).
-    auto base = m_pointee_aliases.at(tyid);
-    auto name = base + "a" + std::to_string(access.alignment);
-    m_src << "typedef " << base << " __attribute__((aligned("
-          << access.alignment << "))) " << name << ";" << std::endl;
-    m_underaligned_aliases.emplace(key, name);
-    return access;
-  };
-  for (auto &func : *m_ir->module()) {
-    for (auto &bb : func) {
-      for (auto &inst : bb) {
-        switch (inst.opcode()) {
-        case spv::Op::OpLoad:
-          mint(inst, pointee_type_id(inst.GetSingleWordOperand(2)), 3);
-          break;
-        case spv::Op::OpStore:
-          mint(inst, pointee_type_id(inst.GetSingleWordOperand(0)), 2);
-          break;
-        case spv::Op::OpCopyMemory: {
-          // The first memory operand applies to the target, a second (SPIR-V
-          // 1.4+), if present, to the source; both sides share a pointee.
-          auto tyid = pointee_type_id(inst.GetSingleWordOperand(0));
-          auto access = mint(inst, tyid, 2);
-          mint(inst, tyid, access.next);
-          break;
-        }
-        default:
-          break;
-        }
-      }
-    }
+  auto key = std::make_pair(tyid, alignment);
+  auto it = m_underaligned_aliases.find(key);
+  if (it != m_underaligned_aliases.end()) {
+    return it->second;
   }
+  // Every pointee reached by a load/store has an OpTypePointer, so its
+  // may_alias alias exists (and is a real typedef: non-dereferenceable kinds
+  // have a natural alignment of 1 and are never under-aligned).
+  auto base = m_pointee_aliases.at(tyid);
+  auto name = m_name_allocator.allocate(base + "a" + std::to_string(alignment));
+  m_out.types << "typedef " << base << " __attribute__((aligned(" << alignment
+              << "))) " << name << ";" << std::endl;
+  m_underaligned_aliases.emplace(key, name);
+  return name;
 }
 
-std::string
-translator_impl::src_access_pointee(uint32_t tyid,
-                                    const MemoryAccess &access) const {
+std::string translator_impl::src_access_pointee(uint32_t tyid,
+                                                const MemoryAccess &access) {
   if (is_underaligned(tyid, access)) {
-    return m_underaligned_aliases.at({tyid, access.alignment});
+    return underaligned_alias(tyid, access.alignment);
   }
   return m_pointee_aliases.at(tyid);
 }
@@ -355,17 +327,18 @@ bool translator_impl::translate_type(const Instruction &inst) {
   case spv::Op::OpTypeStruct: { // TODO support volatile members
     // Declare the structure type. Pointer leaves are encoded as integers (see
     // src_aggregate_element_type), as OpenCL forbids pointers in aggregates.
-    m_src << "struct " + var_for(result) + " {" << std::endl;
+    auto &os = m_out.types;
+    os << "struct " + var_for(result) + " {" << std::endl;
     for (uint32_t opidx = 1; opidx < inst.NumOperands(); opidx++) {
       auto mid = inst.GetSingleWordOperand(opidx);
-      m_src << "  " << src_aggregate_element_type(mid) << " m"
-            << std::to_string(opidx - 1) << ";" << std::endl;
+      os << "  " << src_aggregate_element_type(mid) << " m"
+         << std::to_string(opidx - 1) << ";" << std::endl;
     }
-    m_src << "}";
+    os << "}";
     if (m_packed.count(result)) {
-      m_src << " __attribute__((packed))";
+      os << " __attribute__((packed))";
     }
-    m_src << ";" << std::endl;
+    os << ";" << std::endl;
 
     // Prepare the type name
     typestr = "struct " + var_for(result);
@@ -382,10 +355,10 @@ bool translator_impl::translate_type(const Instruction &inst) {
     if (len == 0) {
       return false;
     }
-    std::string aname = make_valid_identifier("arr" + std::to_string(result));
-    m_src << "typedef struct { " << src_aggregate_element_type(elemtyid)
-          << " e[" << std::to_string(len) << "]; } " << aname << ";"
-          << std::endl;
+    auto aname = m_name_allocator.allocate("arr" + std::to_string(result));
+    m_out.types << "typedef struct { " << src_aggregate_element_type(elemtyid)
+                << " e[" << std::to_string(len) << "]; } " << aname << ";"
+                << std::endl;
     typestr = aname;
     break;
   }
@@ -448,7 +421,7 @@ bool translator_impl::translate_type(const Instruction &inst) {
   case spv::Op::OpTypeOpaque: {
     auto name = inst.GetOperand(1).AsString();
     typestr = "struct " + name;
-    m_src << typestr << ";" << std::endl;
+    m_out.types << typestr << ";" << std::endl;
     break;
   }
   case spv::Op::OpTypeBool:
@@ -613,45 +586,46 @@ bool translator_impl::translate_types_values() {
       auto addressing_mode = inst.GetSingleWordOperand(2);
       auto normalised = inst.GetSingleWordOperand(3);
       auto filter_mode = inst.GetSingleWordOperand(4);
-      m_src << "constant sampler_t " << var_for(result) << " = ";
+      auto &os = m_out.globals;
+      os << "constant sampler_t " << var_for(result) << " = ";
       switch (addressing_mode) {
       case SpvSamplerAddressingModeClampToEdge:
-        m_src << "CLK_ADDRESS_CLAMP_TO_EDGE";
+        os << "CLK_ADDRESS_CLAMP_TO_EDGE";
         break;
       case SpvSamplerAddressingModeClamp:
-        m_src << "CLK_ADDRESS_CLAMP";
+        os << "CLK_ADDRESS_CLAMP";
         break;
       case SpvSamplerAddressingModeRepeat:
-        m_src << "CLK_ADDRESS_REPEAT";
+        os << "CLK_ADDRESS_REPEAT";
         break;
       case SpvSamplerAddressingModeRepeatMirrored:
-        m_src << "CLK_ADDRESS_MIRRORED_REPEAT";
+        os << "CLK_ADDRESS_MIRRORED_REPEAT";
         break;
       case SpvSamplerAddressingModeNone:
-        m_src << "CLK_ADDRESS_NONE";
+        os << "CLK_ADDRESS_NONE";
         break;
       }
 
-      m_src << " | ";
+      os << " | ";
 
       if (normalised) {
-        m_src << "CLK_NORMALIZED_COORDS_TRUE";
+        os << "CLK_NORMALIZED_COORDS_TRUE";
       } else {
-        m_src << "CLK_NORMALIZED_COORDS_FALSE";
+        os << "CLK_NORMALIZED_COORDS_FALSE";
       }
 
-      m_src << " | ";
+      os << " | ";
 
       switch (filter_mode) {
       case SpvSamplerFilterModeNearest:
-        m_src << "CLK_FILTER_NEAREST";
+        os << "CLK_FILTER_NEAREST";
         break;
       case SpvSamplerFilterModeLinear:
-        m_src << "CLK_FILTER_LINEAR";
+        os << "CLK_FILTER_LINEAR";
         break;
       }
 
-      m_src << ";" << std::endl;
+      os << ";" << std::endl;
 
       break;
     }
@@ -779,8 +753,7 @@ bool translator_impl::translate_types_values() {
         // a pointer to it, so var_for() is a pointer. Array types are
         // struct-wrapped (no array-to-pointer decay), so the variable can't be
         // used directly as a pointer the way a bare local array used to be.
-        auto storagename =
-            make_valid_identifier(var_for(result) + "_storage");
+        auto &storagename = derived_name(result, "_storage");
         std::string local_var_decl =
             "local " +
             src_type_memory_object_declaration(typointeeid, result,
@@ -806,21 +779,16 @@ bool translator_impl::translate_types_values() {
         // The SPIR-V id of the variable is a pointer, but OpenCL 1.2 forbids
         // program-scope pointer variables, so we declare the storage as a value
         // and make every reference to the variable take its address.
-        auto storagename = make_valid_identifier(var_for(result) + "_storage");
-        m_src << "constant "
-              << src_type_memory_object_declaration(typointeeid, result,
-                                                    storagename);
+        auto &storagename = derived_name(result, "_storage");
+        m_out.globals << "constant "
+                      << src_type_memory_object_declaration(typointeeid, result,
+                                                            storagename);
         if (inst.NumOperands() > 3) {
           auto init = inst.GetSingleWordOperand(3);
-          m_src << " = " << var_for(init);
+          m_out.globals << " = " << var_for(init);
         }
-        m_src << ";" << std::endl;
-        m_names[result] = "(&" + storagename + ")";
-        // The storage name already captured any linkage name; drop the export/
-        // import alias so references resolve through m_names (the &storage form)
-        // rather than the bare linkage identifier, which is never declared.
-        m_exports.erase(result);
-        m_imports.erase(result);
+        m_out.globals << ";" << std::endl;
+        m_literals[result] = "(&" + storagename + ")";
       } else if (storage == SpvStorageClassCrossWorkgroup) {
         // Program-scope global variable. Legal only from OpenCL C 2.0 on; below
         // that, program-scope variables must live in the constant address space.
@@ -832,21 +800,16 @@ bool translator_impl::translate_types_values() {
         }
         // As with UniformConstant, declare the storage as a value and make every
         // reference take its address (the SPIR-V id is a pointer to it).
-        auto storagename = make_valid_identifier(var_for(result) + "_storage");
-        m_src << "global "
-              << src_type_memory_object_declaration(typointeeid, result,
-                                                    storagename);
+        auto &storagename = derived_name(result, "_storage");
+        m_out.globals << "global "
+                      << src_type_memory_object_declaration(typointeeid, result,
+                                                            storagename);
         if (inst.NumOperands() > 3) {
           auto init = inst.GetSingleWordOperand(3);
-          m_src << " = " << var_for(init);
+          m_out.globals << " = " << var_for(init);
         }
-        m_src << ";" << std::endl;
-        m_names[result] = "(&" + storagename + ")";
-        // The storage name already captured any linkage name; drop the export/
-        // import alias so references resolve through m_names (the &storage form)
-        // rather than the bare linkage identifier, which is never declared.
-        m_exports.erase(result);
-        m_imports.erase(result);
+        m_out.globals << ";" << std::endl;
+        m_literals[result] = "(&" + storagename + ")";
       } else {
         std::cerr << "UNIMPLEMENTED global variable with storage class "
                   << storage << std::endl;

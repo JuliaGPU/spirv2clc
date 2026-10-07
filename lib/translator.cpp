@@ -128,7 +128,8 @@ bool translator_impl::translate_capabilities() {
   std::unordered_set<std::string> enabled_extensions;
   auto enable_extension = [&](const char *ext) {
     if (enabled_extensions.insert(ext).second) {
-      m_src << "#pragma OPENCL EXTENSION " << ext << " : enable" << std::endl;
+      m_out.extensions << "#pragma OPENCL EXTENSION " << ext << " : enable"
+                       << std::endl;
     }
   };
   // cl_khr_subgroups is an OpenCL C 2.0 extension (promoted to the
@@ -333,38 +334,12 @@ bool translator_impl::translate_debug_instructions() {
     switch (opcode) {
     case spv::Op::OpName: {
       auto id = inst.GetSingleWordOperand(0);
-      auto name = inst.GetOperand(1).AsString();
-      // Sanitize into a valid C identifier: map any character that isn't a
-      // letter, digit or underscore to '_' (e.g. Julia names like
-      // "a::CLDeviceArray"), and avoid a leading digit.
-      auto valid_char = [](char c) {
-        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-               (c >= '0' && c <= '9') || c == '_';
-      };
-      for (auto &ch : name) {
-        if (!valid_char(ch)) {
-          ch = '_';
-        }
-      }
-      if (!name.empty() && name[0] >= '0' && name[0] <= '9') {
-        name = "_" + name;
-      }
-      m_names[id] = name;
+      m_debug_names[id] = inst.GetOperand(1).AsString();
       break;
     }
     default:
       std::cerr << "UNIMPLEMENTED debug instructions " << opcode << ".\n";
       return false;
-    }
-  }
-
-  // Fixup names to avoid identifiers invalid in OpenCL C
-  for (auto &id_name : m_names) {
-    auto &id = id_name.first;
-    auto &name = id_name.second;
-    if (gReservedIdentifiers.count(name)) {
-      std::string newname = make_valid_identifier(name);
-      m_names[id] = newname;
     }
   }
 
@@ -567,6 +542,54 @@ bool translator_impl::translate_annotations() {
   return true;
 }
 
+void translator_impl::assign_names() {
+  // Names fixed by the module's interface first, so nothing else can take
+  // them. Entry points are named by their OpEntryPoint.
+  auto fix = [this](uint32_t id, const std::string &name) {
+    if (!m_names.count(id)) {
+      m_name_allocator.reserve(name);
+      m_names[id] = name;
+    }
+  };
+  for (auto &ep : m_entry_points) {
+    fix(ep.first, ep.second);
+  }
+  for (auto &exp : m_exports) {
+    fix(exp.first, exp.second);
+  }
+  for (auto &imp : m_imports) {
+    fix(imp.first, imp.second);
+  }
+  // Then the OpNames, before the made-up "v<id>" names so that those yield on
+  // a clash. Both in module order, for stable output.
+  for (bool named : {true, false}) {
+    m_ir->module()->ForEachInst([this, named](const Instruction *inst) {
+      auto id = inst->result_id();
+      if (id == 0 || m_names.count(id)) {
+        return;
+      }
+      auto it = m_debug_names.find(id);
+      bool has_name = it != m_debug_names.end() && !it->second.empty();
+      if (has_name == named) {
+        m_names[id] = m_name_allocator.allocate(
+            named ? it->second : "v" + std::to_string(id));
+      }
+    });
+  }
+}
+
+const std::string &translator_impl::derived_name(uint32_t id,
+                                                 const std::string &suffix) {
+  auto key = std::make_pair(id, suffix);
+  auto it = m_derived_names.find(key);
+  if (it == m_derived_names.end()) {
+    it = m_derived_names
+             .emplace(key, m_name_allocator.allocate(var_for(id) + suffix))
+             .first;
+  }
+  return it->second;
+}
+
 void translator_impl::compute_workgroup_params() {
   auto defuse = m_ir->get_def_use_mgr();
   for (auto &func : *m_ir->module()) {
@@ -620,52 +643,53 @@ void translator_impl::emit_function_signature(Function &func,
 
   bool entrypoint = m_entry_points.count(result) != 0;
   bool is_external = m_imports.count(result) != 0;
+  auto &os = is_prototype ? m_out.prototypes : m_out.functions;
 
   if (is_prototype) {
     // For prototypes, only emit static non-entry, non-external functions
     if (entrypoint || is_external) {
       return;
     }
-    m_src << "static ";
+    os << "static ";
   } else {
     // For definitions, emit full declaration logic
     if (is_external) {
-      m_src << "extern ";
+      os << "extern ";
     } else if ((m_exports.count(result) == 0) && !entrypoint) {
-      m_src << "static ";
+      os << "static ";
     }
   }
 
   if (control & SpvFunctionControlInlineMask) {
-    m_src << "inline ";
+    os << "inline ";
   }
 
-  m_src << src_type(rtype) + " ";
+  os << src_type(rtype) + " ";
   if (entrypoint && !is_prototype) {
-    m_src << "kernel ";
+    os << "kernel ";
     if (m_entry_points_local_size.count(result)) {
       auto &req = m_entry_points_local_size.at(result);
-      m_src << "__attribute((reqd_work_group_size(";
-      m_src << std::get<0>(req) << "," << std::get<1>(req) << ","
-            << std::get<2>(req);
-      m_src << "))) ";
+      os << "__attribute((reqd_work_group_size(";
+      os << std::get<0>(req) << "," << std::get<1>(req) << ","
+         << std::get<2>(req);
+      os << "))) ";
     }
     if (m_entry_points_subgroup_size.count(result)) {
-      m_src << "__attribute((intel_reqd_sub_group_size("
-            << m_entry_points_subgroup_size.at(result) << "))) ";
+      os << "__attribute((intel_reqd_sub_group_size("
+         << m_entry_points_subgroup_size.at(result) << "))) ";
     }
-    m_src << m_entry_points.at(result);
+    os << m_entry_points.at(result);
   } else {
-    m_src << var_for(result);
+    os << var_for(result);
   }
-  m_src << "(";
+  os << "(";
   std::string sep = "";
-  func.ForEachParam([this, &sep](const Instruction *inst) {
+  func.ForEachParam([this, &sep, &os](const Instruction *inst) {
     auto type = inst->type_id();
     auto result = inst->result_id();
-    m_src << sep;
+    os << sep;
     if (m_nowrite_params.count(result)) {
-      m_src << "const ";
+      os << "const ";
     }
 
     if (m_byval_params.count(result)) {
@@ -675,9 +699,9 @@ void translator_impl::emit_function_signature(Function &func,
       auto ptr_type = param_type->AsPointer();
       auto pointee_type = ptr_type->pointee_type();
       auto pointee_type_id = type_id_for(pointee_type);
-      m_src << src_type(pointee_type_id) << " " << var_for(result) << "_value";
+      os << src_type(pointee_type_id) << " " << derived_name(result, "_value");
     } else {
-      m_src << src_type_memory_object_declaration(type, result);
+      os << src_type_memory_object_declaration(type, result);
     }
     sep = ", ";
   });
@@ -690,17 +714,17 @@ void translator_impl::emit_function_signature(Function &func,
     if (it != m_function_workgroup_params.end()) {
       auto defuse = m_ir->get_def_use_mgr();
       for (auto wgvar : it->second) {
-        m_src << sep;
-        m_src << src_type(defuse->GetDef(wgvar)->type_id()) << " "
-              << var_for(wgvar);
+        os << sep;
+        os << src_type(defuse->GetDef(wgvar)->type_id()) << " "
+           << var_for(wgvar);
         sep = ", ";
       }
     }
   }
 
-  m_src << ")";
+  os << ")";
   if (is_prototype) {
-    m_src << ";" << std::endl;
+    os << ";" << std::endl;
   }
 }
 
@@ -710,9 +734,10 @@ bool translator_impl::translate_function(Function &func) {
 
   bool decl = false;
   bool entrypoint = m_entry_points.count(result) != 0;
+  auto &os = m_out.functions;
 
   if (m_entry_points_contraction_off.count(result)) {
-    m_src << "#pragma OPENCL FP_CONTRACT OFF" << std::endl;
+    os << "#pragma OPENCL FP_CONTRACT OFF" << std::endl;
   }
 
   // Check if this is just a declaration
@@ -724,10 +749,10 @@ bool translator_impl::translate_function(Function &func) {
   emit_function_signature(func, false);
 
   if (decl) {
-    m_src << ";" << std::endl;
+    os << ";" << std::endl;
     return true;
   } else {
-    m_src << "{" << std::endl;
+    os << "{" << std::endl;
   }
 
   // Declare variables in the local address space used by each kernel at the
@@ -760,7 +785,7 @@ bool translator_impl::translate_function(Function &func) {
     m_ir->ProcessCallTreeFromRoots(process_fn, &roots);
 
     for (auto lvarid : used_globals_in_local_as) {
-      m_src << m_local_variable_decls.at(lvarid) << ";\n";
+      os << m_local_variable_decls.at(lvarid) << ";\n";
     }
   }
 
@@ -778,7 +803,6 @@ bool translator_impl::translate_function(Function &func) {
         continue;
       }
       m_phi_vals[&func].push_back(result);
-      m_phi_temps[result] = make_valid_identifier(var_for(result) + "_phi");
 
       for (unsigned i = 2; i < inst.NumOperands(); i += 2) {
         auto var = inst.GetSingleWordOperand(i);
@@ -795,10 +819,11 @@ bool translator_impl::translate_function(Function &func) {
 
   // Add helper variables for byval arguments containing a pointer
   // (for compatibility with existing code)
-  func.ForEachParam([this](const Instruction *inst) {
+  func.ForEachParam([this, &os](const Instruction *inst) {
     auto result = inst->result_id();
     if (m_byval_params.count(result)) {
-      m_src << "  " << src_type(inst->type_id()) << " " << var_for(result) << " = &" << var_for(result) << "_value;\n";
+      os << "  " << src_type(inst->type_id()) << " " << var_for(result)
+         << " = &" << derived_name(result, "_value") << ";\n";
     }
   });
 
@@ -806,13 +831,13 @@ bool translator_impl::translate_function(Function &func) {
     for (auto phival : m_phi_vals.at(&func)) {
       auto phitype = type_id_for(phival);
       // Separate declarations: `T *a, b` would not make b a pointer.
-      m_src << "  " << src_type(phitype) << " " << var_for(phival) << ";\n";
-      m_src << "  " << src_type(phitype) << " " << m_phi_temps.at(phival)
-            << ";\n";
+      os << "  " << src_type(phitype) << " " << var_for(phival) << ";\n";
+      os << "  " << src_type(phitype) << " " << derived_name(phival, "_phi")
+         << ";\n";
     }
   }
   for (auto &bb : func) {
-    m_src << var_for(bb.id()) + ":;" << std::endl;
+    os << var_for(bb.id()) + ":;" << std::endl;
     // Translate all instructions except the terminator. The phis lead the
     // block; each commits the value staged by the predecessor we came from.
     for (auto &inst : bb) {
@@ -820,8 +845,8 @@ bool translator_impl::translate_function(Function &func) {
         break;
       }
       if (inst.opcode() == spv::Op::OpPhi) {
-        m_src << "  " << var_for(inst.result_id()) << " = "
-              << m_phi_temps.at(inst.result_id()) << ";\n";
+        os << "  " << var_for(inst.result_id()) << " = "
+           << derived_name(inst.result_id(), "_phi") << ";\n";
         continue;
       }
       std::string isrc;
@@ -829,7 +854,7 @@ bool translator_impl::translate_function(Function &func) {
         error = true;
       }
       if (isrc != "") {
-        m_src << "  " << isrc << ";\n";
+        os << "  " << isrc << ";\n";
       }
     }
     // Stage the incoming values of the successors' phis. Staging for every
@@ -837,8 +862,8 @@ bool translator_impl::translate_function(Function &func) {
     // on entry to its phi's block.
     if (m_phi_assigns.count(&bb)) {
       for (auto &phival_var : m_phi_assigns.at(&bb)) {
-        m_src << "  " << m_phi_temps.at(phival_var.first) << " = "
-              << var_for(phival_var.second) << ";\n";
+        os << "  " << derived_name(phival_var.first, "_phi") << " = "
+           << var_for(phival_var.second) << ";\n";
       }
     }
 
@@ -848,14 +873,14 @@ bool translator_impl::translate_function(Function &func) {
       error = true;
     }
     if (isrc != "") {
-      m_src << "  " << isrc << ";\n";
+      os << "  " << isrc << ";\n";
     }
   }
 
-  m_src << "}\n";
+  os << "}\n";
 
   if (m_entry_points_contraction_off.count(result)) {
-    m_src << "#pragma OPENCL FP_CONTRACT ON" << std::endl;
+    os << "#pragma OPENCL FP_CONTRACT ON" << std::endl;
   }
 
   return !error;
@@ -905,14 +930,12 @@ int translator_impl::translate() {
     return 1;
   }
 
+  assign_names();
+
   // 9. Type declarations, constants and global variables
   if (!translate_types_values()) {
     return 1;
   }
-
-  // Under-aligned accesses in the function bodies need reduced-alignment
-  // typedefs; mint them now, while still in the type section.
-  declare_underaligned_aliases();
 
   // Work out which non-entry functions reference module-scope Workgroup
   // variables, so their signatures and call sites can thread them through as
@@ -971,7 +994,7 @@ int translator_impl::translate(const std::string &assembly,
   int ret = translate();
 
   if (ret == 0) {
-    *srcout = m_src.str();
+    *srcout = m_out.render();
   }
 
   return ret;
@@ -990,7 +1013,7 @@ int translator_impl::translate(const std::vector<uint32_t> &binary,
   int ret = translate();
 
   if (ret == 0) {
-    *srcout = m_src.str();
+    *srcout = m_out.render();
   }
 
   return ret;

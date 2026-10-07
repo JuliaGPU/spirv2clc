@@ -46,6 +46,40 @@ class Type;
 
 namespace spirv2clc {
 
+// Hands out C identifiers, unique across the whole program and clear of C and
+// OpenCL C keywords and type names. Every identifier the translator emits comes
+// from here, both those derived from the module (linkage names, OpName) and
+// those it makes up (storage, temporaries, typedefs), so they can't collide.
+class name_allocator {
+public:
+  // Claim `name` verbatim, for names fixed by the module's interface (entry
+  // points, linkage names) that can't be changed.
+  void reserve(const std::string &name) { m_used.insert(name); }
+
+  // A fresh identifier based on `hint`.
+  std::string allocate(const std::string &hint);
+
+private:
+  std::unordered_set<std::string> m_used;
+};
+
+// The program text, assembled from sections that are concatenated once
+// translation is done. A declaration goes into its section whenever the need
+// for it arises (e.g. a typedef first required by a function body), so the
+// order of translation doesn't dictate the order of the output.
+struct output {
+  std::ostringstream extensions; // #pragma OPENCL EXTENSION
+  std::ostringstream types;      // struct definitions and typedefs
+  std::ostringstream globals;    // program-scope variables and samplers
+  std::ostringstream prototypes; // declarations of the static functions
+  std::ostringstream functions;  // function definitions
+
+  std::string render() const {
+    return extensions.str() + types.str() + globals.str() + prototypes.str() +
+           functions.str();
+  }
+};
+
 struct translator_impl {
 
   translator_impl(spv_target_env env, unsigned opencl_c_version);
@@ -65,17 +99,12 @@ private:
 
   uint32_t array_type_get_length(uint32_t tyid) const;
 
+  // The C spelling of value `id`: its literal or builtin query for values
+  // that are never declared, its identifier otherwise.
   std::string var_for(uint32_t id) const {
     if (m_literals.count(id)) {
       return m_literals.at(id);
-    } else if (m_exports.count(id)) {
-      return m_exports.at(id);
-    } else if (m_imports.count(id)) {
-      return m_imports.at(id);
     } else if (m_builtin_values.count(id)) {
-      // Checked before m_names: a scalar built-in load (assign_result=false, so
-      // no declaration) renders as its builtin call even when codegen also gave
-      // the load result a name, which would otherwise be an undeclared use.
       switch (m_builtin_values.at(id)) {
       case SpvBuiltInWorkDim:
         return src_function_call("get_work_dim");
@@ -105,9 +134,17 @@ private:
     } else if (m_names.count(id)) {
       return m_names.at(id);
     } else {
-      return "v" + std::to_string(id);
+      return note_unsupported("unnamed id " + std::to_string(id));
     }
   }
+
+  // Give every result id of the module its identifier (see m_names).
+  void assign_names();
+
+  // The identifier of an object derived from `id`, e.g. the storage behind a
+  // variable or the temporary staging a phi's incoming value. Allocated on
+  // first request; later requests return the same name.
+  const std::string &derived_name(uint32_t id, const std::string &suffix);
 
   std::string src_var_decl(uint32_t tyid, const std::string &name,
                            uint32_t val = 0) const;
@@ -319,20 +356,18 @@ private:
   // pointee would assert.
   bool is_underaligned(uint32_t tyid, const MemoryAccess &access) const;
 
-  // Scan all function bodies and mint reduced-alignment typedefs for every
-  // under-aligned access; runs after type translation so the typedefs land in
-  // the type section. See the definition for why.
-  void declare_underaligned_aliases();
+  // The reduced-alignment typedef for accessing a `tyid` at `alignment`,
+  // declared on first request. See the definition for why.
+  std::string underaligned_alias(uint32_t tyid, uint32_t alignment);
 
   // The pointee spelling for an access: the reduced-alignment alias when the
   // access is under-aligned, the plain may_alias alias otherwise.
-  std::string src_access_pointee(uint32_t tyid,
-                                 const MemoryAccess &access) const;
+  std::string src_access_pointee(uint32_t tyid, const MemoryAccess &access);
 
   // The lvalue for a load/store through `ptr`, honouring the access's
   // MemoryAccess operands: a plain dereference when they claim nothing a C
   // dereference doesn't, a cast through src_access_pointee otherwise.
-  std::string src_dereference(uint32_t ptr, const MemoryAccess &access) const;
+  std::string src_dereference(uint32_t ptr, const MemoryAccess &access);
 
   std::string src_aggregate_element_type(uint32_t tyid) const;
 
@@ -357,9 +392,6 @@ private:
   // literal of its per-dimension queries, used when the load is consumed as a
   // whole value (OpPhi incoming, store, ...) rather than component-extracted.
   std::string builtin_vector(uint32_t id) const;
-
-  bool is_valid_identifier(const std::string &name) const;
-  std::string make_valid_identifier(const std::string &name) const;
 
   std::optional<std::string>
   get_string_literal(const spvtools::opt::Instruction &inst) const;
@@ -410,8 +442,11 @@ private:
 
   void reset() {
     m_translation_failed = false;
-    m_src.str("");
+    m_out = output();
+    m_name_allocator = name_allocator();
+    m_debug_names.clear();
     m_names.clear();
+    m_derived_names.clear();
     m_types.clear();
     m_types_signed.clear();
     m_pointee_aliases.clear();
@@ -436,7 +471,6 @@ private:
     m_alignments.clear();
     m_phi_vals.clear();
     m_phi_assigns.clear();
-    m_phi_temps.clear();
     m_sampled_images.clear();
     m_boolean_src_types.clear();
     m_local_variable_decls.clear();
@@ -452,15 +486,20 @@ private:
   mutable bool m_translation_failed = false;
 
   std::unique_ptr<spvtools::opt::IRContext> m_ir;
-  std::stringstream m_src;
+  output m_out;
+  name_allocator m_name_allocator;
+  // OpName strings, as given.
+  std::unordered_map<uint32_t, std::string> m_debug_names;
+  // Every result id's C identifier (see assign_names).
   std::unordered_map<uint32_t, std::string> m_names;
+  std::map<std::pair<uint32_t, std::string>, std::string> m_derived_names;
   std::unordered_map<uint32_t, std::string> m_types;
   std::unordered_map<uint32_t, std::string> m_types_signed;
   // Pointee type id -> may_alias typedef name (see declare_pointee_alias).
   std::unordered_map<uint32_t, std::string> m_pointee_aliases;
   std::unordered_map<uint32_t, std::string> m_pointee_aliases_signed;
   // (pointee type id, alignment) -> reduced-alignment typedef name (see
-  // declare_underaligned_aliases).
+  // underaligned_alias).
   std::map<std::pair<uint32_t, uint32_t>, std::string> m_underaligned_aliases;
   std::unordered_map<uint32_t, std::string> m_literals;
   std::unordered_map<uint32_t, std::string> m_entry_points;
@@ -486,8 +525,6 @@ private:
   std::unordered_map<spvtools::opt::BasicBlock *,
                      std::vector<std::pair<uint32_t, uint32_t>>>
       m_phi_assigns;
-  // Phi value -> the temporary its predecessors stage the incoming value in.
-  std::unordered_map<uint32_t, std::string> m_phi_temps;
   std::unordered_map<uint32_t, std::pair<uint32_t, uint32_t>> m_sampled_images;
   std::unordered_map<uint32_t, std::string>
       m_boolean_src_types; // value, C type name
