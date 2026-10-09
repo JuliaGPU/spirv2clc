@@ -1,0 +1,35 @@
+; Integer conversions with a signed result on vectors. Integer values are
+; emitted as unsigned C types and OpenCL C has no implicit conversion between
+; vector types, so the signed result of convert_<signed type> is reinterpreted
+; as the result type.
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Linkage
+               OpCapability Int64
+               OpCapability Int16
+               OpMemoryModel Physical64 OpenCL
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+     %ushort = OpTypeInt 16 0
+      %ulong = OpTypeInt 64 0
+     %v4uint = OpTypeVector %uint 4
+   %v4ushort = OpTypeVector %ushort 4
+    %v4ulong = OpTypeVector %ulong 4
+     %p_v4l = OpTypePointer CrossWorkgroup %v4ulong
+     %p_v4s = OpTypePointer CrossWorkgroup %v4ushort
+       %fnty = OpTypeFunction %void %v4uint %p_v4l %p_v4s
+         %fn = OpFunction %void None %fnty
+          %x = OpFunctionParameter %v4uint
+         %ol = OpFunctionParameter %p_v4l
+         %os = OpFunctionParameter %p_v4s
+        %lbl = OpLabel
+       %sext = OpSConvert %v4ulong %x
+      %satus = OpSatConvertUToS %v4ushort %x
+               OpStore %ol %sext
+               OpStore %os %satus
+               OpReturn
+               OpFunctionEnd
+; CHECK: ulong4 {{v[0-9]+}} = as_ulong4(convert_long4(as_int4([[X:v[0-9]+]])));
+; CHECK: ushort4 {{v[0-9]+}} = as_ushort4(convert_short4_sat([[X]]));

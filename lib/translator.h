@@ -250,6 +250,10 @@ private:
   // mask as wide as the selected elements.
   c::expr_ref select_condition(uint32_t cond, uint32_t result_tyid) const;
 
+  // `mask`, a canonical intN mask (or a scalar condition), as the condition of
+  // a select of `result_tyid` values.
+  c::expr_ref select_mask(c::expr_ref mask, uint32_t result_tyid) const;
+
   // The C type of the components of vector type `tyid`.
   std::string src_vector_element_type(uint32_t tyid) const;
 

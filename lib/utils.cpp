@@ -163,15 +163,23 @@ c::expr_ref translator_impl::relational_mask(uint32_t operand,
 
 c::expr_ref translator_impl::select_condition(uint32_t cond,
                                               uint32_t result_tyid) const {
-  auto result_type = type_for(result_tyid);
-  if (type_for_val(cond)->kind() != Type::Kind::kVector ||
-      element_width(result_type) == 32) {
+  if (type_for_val(cond)->kind() != Type::Kind::kVector) {
     return value(cond);
+  }
+  return select_mask(value(cond), result_tyid);
+}
+
+c::expr_ref translator_impl::select_mask(c::expr_ref mask,
+                                         uint32_t result_tyid) const {
+  auto result_type = type_for(result_tyid);
+  if (result_type->kind() != Type::Kind::kVector ||
+      element_width(result_type) == 32) {
+    return mask;
   }
   auto count = std::to_string(result_type->AsVector()->element_count());
   return c::call("convert_" + signed_int_type(element_width(result_type)) +
                      count,
-                 {value(cond)});
+                 {std::move(mask)});
 }
 
 std::string translator_impl::src_vector_element_type(uint32_t tyid) const {

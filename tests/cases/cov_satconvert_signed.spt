@@ -4,7 +4,8 @@
 ;    reinterpreted as signed (as_int) so negatives saturate to 0, not to a huge
 ;    positive; the destination is the unsigned result type (convert_uchar_sat).
 ;  - OpSatConvertUToS: unsigned source -> signed dest. The operand is taken
-;    as-is and the destination is the signed result type (convert_char_sat).
+;    as-is, converted to the signed type (convert_char_sat) and reinterpreted
+;    as the unsigned result type (as_uchar).
 ; (Previously both were emitted with the source/dest signedness swapped.)
 ; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
 ; RUN: %spirv2clc --asm %s | %FileCheck %s
@@ -30,4 +31,4 @@
                OpReturn
                OpFunctionEnd
 ; CHECK: = convert_uchar_sat(as_int({{v[0-9]+}}));
-; CHECK: = convert_char_sat({{v[0-9]+}});
+; CHECK: = as_uchar(convert_char_sat({{v[0-9]+}}));

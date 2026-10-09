@@ -1,0 +1,65 @@
+; Float-to-int conversions on vectors. Integer values are emitted as unsigned C
+; types and OpenCL C has no implicit conversion between vector types, so the
+; signed result of OpConvertFToS is reinterpreted as the result type. A
+; saturating conversion maps NaN to 0 with a select, whose condition must be as
+; wide as the result's elements and whose zero must have the result type,
+; whatever the width of the source.
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Linkage
+               OpCapability Int16
+               OpCapability Int64
+               OpCapability Float64
+               OpMemoryModel Physical64 OpenCL
+               OpDecorate %sat_s SaturatedConversion
+               OpDecorate %sat_u SaturatedConversion
+               OpDecorate %sat_narrow SaturatedConversion
+               OpDecorate %sat_scalar SaturatedConversion
+               OpDecorate %sat_wide SaturatedConversion
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+     %ushort = OpTypeInt 16 0
+      %ulong = OpTypeInt 64 0
+        %f32 = OpTypeFloat 32
+        %f64 = OpTypeFloat 64
+     %v4uint = OpTypeVector %uint 4
+   %v4ushort = OpTypeVector %ushort 4
+    %v4ulong = OpTypeVector %ulong 4
+      %v4f32 = OpTypeVector %f32 4
+      %v4f64 = OpTypeVector %f64 4
+     %p_v4u = OpTypePointer CrossWorkgroup %v4uint
+     %p_v4s = OpTypePointer CrossWorkgroup %v4ushort
+       %p_u = OpTypePointer CrossWorkgroup %uint
+     %p_v4l = OpTypePointer CrossWorkgroup %v4ulong
+       %fnty = OpTypeFunction %void %v4f64 %v4f32 %f64 %p_v4u %p_v4s %p_u %p_v4l
+         %fn = OpFunction %void None %fnty
+          %d = OpFunctionParameter %v4f64
+          %f = OpFunctionParameter %v4f32
+          %s = OpFunctionParameter %f64
+         %ou = OpFunctionParameter %p_v4u
+         %os = OpFunctionParameter %p_v4s
+        %osc = OpFunctionParameter %p_u
+         %ol = OpFunctionParameter %p_v4l
+        %lbl = OpLabel
+       %ftos = OpConvertFToS %v4uint %d
+      %sat_s = OpConvertFToS %v4uint %d
+      %sat_u = OpConvertFToU %v4uint %d
+ %sat_narrow = OpConvertFToS %v4ushort %f
+ %sat_scalar = OpConvertFToS %uint %s
+   %sat_wide = OpConvertFToS %v4ulong %f
+               OpStore %ou %ftos
+               OpStore %ou %sat_s
+               OpStore %ou %sat_u
+               OpStore %os %sat_narrow
+               OpStore %osc %sat_scalar
+               OpStore %ol %sat_wide
+               OpReturn
+               OpFunctionEnd
+; CHECK: uint4 {{v[0-9]+}} = as_uint4(convert_int4_rtz([[D:v[0-9]+]]));
+; CHECK: uint4 {{v[0-9]+}} = convert_int4(isnan([[D]])) ? (uint4)(0) : as_uint4(convert_int4_sat_rtz([[D]]));
+; CHECK: uint4 {{v[0-9]+}} = convert_int4(isnan([[D]])) ? (uint4)(0) : convert_uint4_sat_rtz([[D]]);
+; CHECK: ushort4 {{v[0-9]+}} = convert_short4(isnan([[F:v[0-9]+]])) ? (ushort4)(0) : as_ushort4(convert_short4_sat_rtz([[F]]));
+; CHECK: uint {{v[0-9]+}} = isnan([[S:v[0-9]+]]) ? (uint)0 : as_uint(convert_int_sat_rtz([[S]]));
+; CHECK: ulong4 {{v[0-9]+}} = convert_long4(isnan([[F]])) ? (ulong4)(0) : as_ulong4(convert_long4_sat_rtz([[F]]));

@@ -958,11 +958,15 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     }
 
     val = c::call(fn, {value(op)});
+    if (opcode == spv::Op::OpConvertFToS) {
+      val = as_type(rtype, val);
+    }
 
     // SPIR-V requires that NaNs be converted to 0 for saturating conversions
     // but OpenCL C just recommends it (§6.2.3)
     if (sat) {
-      val = c::ternary(call_values("isnan", {op}), c::literal("0"), val);
+      auto is_nan = relational_mask(op, call_values("isnan", {op}));
+      val = c::ternary(select_mask(is_nan, rtype), null_constant(rtype), val);
     }
 
     break;
@@ -1003,11 +1007,11 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     break;
   case spv::Op::OpSatConvertUToS:
     // Unsigned source -> signed dest, saturating (clamps to the signed range).
-    // The operand is taken as-is (unsigned); the destination is the signed
-    // result type (cf. OpConvertFToS, which likewise converts to the signed
-    // type name without reinterpreting the operand).
-    val = call_values("convert_" + src_type_signed(rtype) + "_sat",
-                      {inst.GetSingleWordOperand(2)});
+    // The operand is taken as-is (unsigned); the signed result is
+    // reinterpreted as the (unsigned) result type.
+    val =
+        as_type(rtype, call_values("convert_" + src_type_signed(rtype) + "_sat",
+                                   {inst.GetSingleWordOperand(2)}));
     break;
   case spv::Op::OpBitcast: {
     auto operand = inst.GetSingleWordOperand(2);
@@ -1022,8 +1026,8 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     break;
   }
   case spv::Op::OpSConvert:
-    val = c::call("convert_" + src_type_signed(rtype),
-                  {as_signed(inst.GetSingleWordOperand(2))});
+    val = as_type(rtype, c::call("convert_" + src_type_signed(rtype),
+                                 {as_signed(inst.GetSingleWordOperand(2))}));
     break;
   case spv::Op::OpFConvert:
   case spv::Op::OpUConvert:

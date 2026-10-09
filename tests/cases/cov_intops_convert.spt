@@ -46,11 +46,11 @@
                OpReturn
                OpFunctionEnd
 ; CHECK: = convert_uint_rtz(
-; CHECK: = convert_int_rtz(
+; CHECK: = as_uint(convert_int_rtz(
 ; OpSatConvertSToU: signed source (as_int) -> unsigned (ushort) dest
 ; CHECK: = convert_ushort_sat(as_int(
 ; OpSatConvertUToS: unsigned source -> signed (short) dest
-; CHECK: = convert_short_sat(
-; CHECK: = convert_long(as_int(
+; CHECK: = as_ushort(convert_short_sat(
+; CHECK: = as_ulong(convert_long(as_int(
 ; CHECK: = convert_ulong(
 ; CHECK: = convert_double(
