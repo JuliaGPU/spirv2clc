@@ -85,10 +85,17 @@ std::string translator_impl::atomic_builtin(const std::string &op,
   return (is64 ? "atom_" : "atomic_") + op;
 }
 
+c::expr_ref translator_impl::atomic_pointer(uint32_t ptr,
+                                            const std::string &ty) const {
+  auto storage = type_for_val(ptr)->AsPointer()->storage_class();
+  std::string as = address_space_qualifier(static_cast<uint32_t>(storage));
+  return c::cast("volatile " + (as.empty() ? "" : as + " ") + ty + "*",
+                 value(ptr));
+}
+
 c::expr_ref translator_impl::atomic_c11_pointer(uint32_t ptr,
                                                 bool is_signed) const {
-  auto ptrty = type_for_val(ptr)->AsPointer();
-  auto pointee = ptrty->pointee_type();
+  auto pointee = type_for_val(ptr)->AsPointer()->pointee_type();
   std::string ty;
   if (pointee->kind() == Type::Kind::kFloat) {
     ty = pointee->AsFloat()->width() == 64 ? "atomic_double" : "atomic_float";
@@ -97,10 +104,7 @@ c::expr_ref translator_impl::atomic_c11_pointer(uint32_t ptr,
     ty = is64 ? (is_signed ? "atomic_long" : "atomic_ulong")
               : (is_signed ? "atomic_int" : "atomic_uint");
   }
-  std::string as =
-      address_space_qualifier(static_cast<uint32_t>(ptrty->storage_class()));
-  return c::cast("volatile " + (as.empty() ? "" : as + " ") + ty + "*",
-                 value(ptr));
+  return atomic_pointer(ptr, ty);
 }
 
 std::optional<uint32_t>
@@ -519,7 +523,9 @@ bool translator_impl::translate_instruction(const Instruction &inst,
   case spv::Op::OpAtomicUMax:
   case spv::Op::OpAtomicUMin:
   case spv::Op::OpAtomicXor:
-  case spv::Op::OpAtomicFAddEXT: {
+  case spv::Op::OpAtomicFAddEXT:
+  case spv::Op::OpAtomicFMinEXT:
+  case spv::Op::OpAtomicFMaxEXT: {
     auto ptr = inst.GetSingleWordOperand(2);
     auto scope = constant_operand(inst.GetSingleWordOperand(3), "atomic scope");
     auto mem_sem =
@@ -555,6 +561,8 @@ bool translator_impl::translate_instruction(const Instruction &inst,
           {spv::Op::OpAtomicUMin, "atomic_fetch_min_explicit"},
           {spv::Op::OpAtomicXor, "atomic_fetch_xor_explicit"},
           {spv::Op::OpAtomicFAddEXT, "atomic_fetch_add_explicit"},
+          {spv::Op::OpAtomicFMinEXT, "atomic_fetch_min_explicit"},
+          {spv::Op::OpAtomicFMaxEXT, "atomic_fetch_max_explicit"},
       };
       auto scope_arg = memory_scope(*scope);
       if (!scope_arg) {
@@ -577,7 +585,9 @@ bool translator_impl::translate_instruction(const Instruction &inst,
                 << opencl_c_version_str(m_opencl_c_version) << ").\n";
       return false;
     }
-    if (opcode == spv::Op::OpAtomicFAddEXT) {
+    if (opcode == spv::Op::OpAtomicFAddEXT ||
+        opcode == spv::Op::OpAtomicFMinEXT ||
+        opcode == spv::Op::OpAtomicFMaxEXT) {
       std::cerr << "UNIMPLEMENTED: floating-point atomics require OpenCL C "
                    "2.0 (targeting "
                 << opencl_c_version_str(m_opencl_c_version) << ").\n";
@@ -611,6 +621,8 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     }
     break;
   }
+  // SPIR-V gives the weak exchange the semantics of the strong one.
+  case spv::Op::OpAtomicCompareExchangeWeak:
   case spv::Op::OpAtomicCompareExchange: {
     auto ptr = inst.GetSingleWordOperand(2);
     auto scope = constant_operand(inst.GetSingleWordOperand(3), "atomic scope");
@@ -684,6 +696,52 @@ bool translator_impl::translate_instruction(const Instruction &inst,
           c::call("atomic_store_explicit",
                   {atomic_c11_pointer(ptr), value(stored),
                    spell(without_acquire(order_of(*mem_sem))), scope_arg}));
+    }
+    break;
+  }
+  case spv::Op::OpAtomicFlagTestAndSet:
+  case spv::Op::OpAtomicFlagClear: {
+    bool is_test = opcode == spv::Op::OpAtomicFlagTestAndSet;
+    auto ptr = inst.GetSingleWordOperand(is_test ? 2 : 0);
+    auto scope = constant_operand(inst.GetSingleWordOperand(is_test ? 3 : 1),
+                                  "atomic scope");
+    auto mem_sem = constant_operand(inst.GetSingleWordOperand(is_test ? 4 : 2),
+                                    "atomic semantics");
+    if (!scope || !mem_sem) {
+      return false;
+    }
+    if (m_opencl_c_version >= 200) {
+      auto scope_arg = memory_scope(*scope);
+      if (!scope_arg) {
+        return false;
+      }
+      // Valid SPIR-V has no acquire order on a clear, which OpenCL C rejects.
+      auto flag = atomic_pointer(ptr, "atomic_flag");
+      auto order = spell(order_of(*mem_sem));
+      if (is_test) {
+        val = c::call("atomic_flag_test_and_set_explicit",
+                      {flag, order, scope_arg});
+      } else {
+        fb.expression(
+            c::call("atomic_flag_clear_explicit", {flag, order, scope_arg}));
+      }
+      break;
+    }
+    if (order_of(*mem_sem) != memory_order::relaxed) {
+      std::cerr << "UNIMPLEMENTED: ordered atomics require OpenCL C 2.0 "
+                   "(targeting "
+                << opencl_c_version_str(m_opencl_c_version) << ").\n";
+      return false;
+    }
+    // OpenCL C 1.x has no flags, but the flag is a 32-bit integer that only
+    // these instructions access, so exchanging in 1 or 0 implements them (as
+    // the Khronos translator does).
+    auto old =
+        c::call("atomic_xchg", {value(ptr), c::literal(is_test ? "1u" : "0u")});
+    if (is_test) {
+      val = c::binary("!=", old, c::literal("0u"));
+    } else {
+      fb.expression(old);
     }
     break;
   }

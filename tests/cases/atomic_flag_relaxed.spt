@@ -1,0 +1,34 @@
+; Below OpenCL C 2.0, which has no flags, relaxed flag operations exchange 1 or
+; 0 into the flag's 32-bit integer storage, as the Khronos translator does.
+; RUN: %spirv2clc --asm --cl-std=CL1.2 %s | %FileCheck %s --check-prefix=CL12
+; RUN: %spirv2clc --asm --cl-std=CL1.2 %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm --cl-std=CL2.0 %s | %FileCheck %s --check-prefix=CL20
+; RUN: %spirv2clc --asm --cl-std=CL2.0 %s | %clang -c -cl-std=CL2.0 -x cl - -o /dev/null
+               OpCapability Kernel
+               OpCapability Addresses
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+       %void = OpTypeVoid
+       %bool = OpTypeBool
+       %uint = OpTypeInt 32 0
+         %pl = OpTypePointer Workgroup %uint
+         %pg = OpTypePointer CrossWorkgroup %uint
+      %scope = OpConstant %uint 2
+        %sem = OpConstant %uint 0
+       %zero = OpConstant %uint 0
+        %one = OpConstant %uint 1
+       %fnty = OpTypeFunction %void %pl %pg
+          %k = OpFunction %void None %fnty
+          %f = OpFunctionParameter %pl
+          %o = OpFunctionParameter %pg
+        %lbl = OpLabel
+        %was = OpAtomicFlagTestAndSet %bool %f %scope %sem
+          %v = OpSelect %uint %was %one %zero
+               OpStore %o %v
+               OpAtomicFlagClear %f %scope %sem
+               OpReturn
+               OpFunctionEnd
+; CL12: = atomic_xchg({{v[0-9]+}}, 1u) != 0u
+; CL12: atomic_xchg({{v[0-9]+}}, 0u);
+; CL20: = atomic_flag_test_and_set_explicit((volatile local atomic_flag*){{v[0-9]+}}, memory_order_relaxed, memory_scope_work_group)
+; CL20: atomic_flag_clear_explicit((volatile local atomic_flag*){{v[0-9]+}}, memory_order_relaxed, memory_scope_work_group)
