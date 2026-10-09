@@ -206,7 +206,10 @@ bool translator_impl::translate_capabilities() {
       break;
     case SpvCapabilityAtomicFloat32AddEXT:
     case SpvCapabilityAtomicFloat64AddEXT:
-      // Floating-point atomic add (atomic_add on float/double).
+    case SpvCapabilityAtomicFloat32MinMaxEXT:
+    case SpvCapabilityAtomicFloat64MinMaxEXT:
+      // Floating-point atomic add, min and max (atomic_fetch_*_explicit on
+      // atomic_float/atomic_double).
       enable_extension("cl_ext_float_atomics");
       break;
     default:
@@ -223,6 +226,7 @@ bool translator_impl::translate_extensions() const {
   static const std::unordered_set<std::string> handled = {
       "SPV_KHR_no_integer_wrap_decoration",
       "SPV_EXT_shader_atomic_float_add",
+      "SPV_EXT_shader_atomic_float_min_max",
   };
   for (auto &inst : m_ir->module()->extensions()) {
     assert(inst.opcode() == spv::Op::OpExtension);

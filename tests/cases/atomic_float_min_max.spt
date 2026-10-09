@@ -1,0 +1,39 @@
+; Floating-point atomic min/max (OpAtomicFMinEXT/OpAtomicFMaxEXT,
+; SPV_EXT_shader_atomic_float_min_max) lower like the floating-point atomic add:
+; to the C11 atomic_fetch_min/max on a pointer reinterpreted as atomic_float or
+; atomic_double (cl_ext_float_atomics), which needs OpenCL C 2.0.
+; RUN: not %spirv2clc --asm --spirv-version=1.4 --cl-std=CL1.2 %s
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL2.0 %s | %FileCheck %s
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL2.0 %s | %clang -c -cl-std=CL2.0 -x cl - -o /dev/null
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Float64
+               OpCapability AtomicFloat32MinMaxEXT
+               OpCapability AtomicFloat64MinMaxEXT
+               OpExtension "SPV_EXT_shader_atomic_float_min_max"
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+       %void = OpTypeVoid
+        %f32 = OpTypeFloat 32
+        %f64 = OpTypeFloat 64
+       %uint = OpTypeInt 32 0
+        %p_g = OpTypePointer CrossWorkgroup %f32
+       %p_gd = OpTypePointer CrossWorkgroup %f64
+      %scope = OpConstant %uint 1
+        %sem = OpConstant %uint 0
+        %one = OpConstant %f32 1
+       %oned = OpConstant %f64 1
+       %fnty = OpTypeFunction %void %p_g %p_gd
+          %k = OpFunction %void None %fnty
+        %ptr = OpFunctionParameter %p_g
+       %ptrd = OpFunctionParameter %p_gd
+        %lbl = OpLabel
+        %min = OpAtomicFMinEXT %f32 %ptr %scope %sem %one
+        %max = OpAtomicFMaxEXT %f64 %ptrd %scope %sem %oned
+               OpStore %ptr %min
+               OpStore %ptrd %max
+               OpReturn
+               OpFunctionEnd
+; CHECK: #pragma OPENCL EXTENSION cl_ext_float_atomics : enable
+; CHECK: = atomic_fetch_min_explicit((volatile global atomic_float*){{v[0-9]+}}, {{.*}}, memory_order_relaxed, memory_scope_device)
+; CHECK: = atomic_fetch_max_explicit((volatile global atomic_double*){{v[0-9]+}}, {{.*}}, memory_order_relaxed, memory_scope_device)

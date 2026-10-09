@@ -519,7 +519,9 @@ bool translator_impl::translate_instruction(const Instruction &inst,
   case spv::Op::OpAtomicUMax:
   case spv::Op::OpAtomicUMin:
   case spv::Op::OpAtomicXor:
-  case spv::Op::OpAtomicFAddEXT: {
+  case spv::Op::OpAtomicFAddEXT:
+  case spv::Op::OpAtomicFMinEXT:
+  case spv::Op::OpAtomicFMaxEXT: {
     auto ptr = inst.GetSingleWordOperand(2);
     auto scope = constant_operand(inst.GetSingleWordOperand(3), "atomic scope");
     auto mem_sem =
@@ -555,6 +557,8 @@ bool translator_impl::translate_instruction(const Instruction &inst,
           {spv::Op::OpAtomicUMin, "atomic_fetch_min_explicit"},
           {spv::Op::OpAtomicXor, "atomic_fetch_xor_explicit"},
           {spv::Op::OpAtomicFAddEXT, "atomic_fetch_add_explicit"},
+          {spv::Op::OpAtomicFMinEXT, "atomic_fetch_min_explicit"},
+          {spv::Op::OpAtomicFMaxEXT, "atomic_fetch_max_explicit"},
       };
       auto scope_arg = memory_scope(*scope);
       if (!scope_arg) {
@@ -577,7 +581,9 @@ bool translator_impl::translate_instruction(const Instruction &inst,
                 << opencl_c_version_str(m_opencl_c_version) << ").\n";
       return false;
     }
-    if (opcode == spv::Op::OpAtomicFAddEXT) {
+    if (opcode == spv::Op::OpAtomicFAddEXT ||
+        opcode == spv::Op::OpAtomicFMinEXT ||
+        opcode == spv::Op::OpAtomicFMaxEXT) {
       std::cerr << "UNIMPLEMENTED: floating-point atomics require OpenCL C "
                    "2.0 (targeting "
                 << opencl_c_version_str(m_opencl_c_version) << ").\n";
