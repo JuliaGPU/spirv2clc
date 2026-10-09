@@ -353,11 +353,7 @@ bool translator_impl::translate_instruction(const Instruction &inst,
       // declared.
       auto builtin = m_builtin_variables.at(ptr);
       m_builtin_values[result] = builtin;
-      if (type_for(rtype)->kind() == Type::Kind::kVector) {
-        m_bindings[result] = builtin_vector(result);
-      } else {
-        m_bindings[result] = builtin_scalar(builtin);
-      }
+      m_bindings[result] = builtin_value(builtin, rtype);
       assign_result = false;
     } else {
       val = dereference(ptr, memory_access_operands(inst, 3));
@@ -750,7 +746,8 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     if (m_builtin_values.count(comp)) {
       // Built-in values are vectors of scalars, so there is a single index.
       val = builtin_vector_extract(
-          comp, c::literal(std::to_string(inst.GetSingleWordOperand(3))));
+          m_builtin_values.at(comp),
+          c::literal(std::to_string(inst.GetSingleWordOperand(3))));
       break;
     }
     c::expr_ref member;
@@ -797,7 +794,7 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     auto vec = inst.GetSingleWordOperand(2);
     auto idx = inst.GetSingleWordOperand(3);
     if (m_builtin_values.count(vec)) {
-      val = builtin_vector_extract(vec, value(idx));
+      val = builtin_vector_extract(m_builtin_values.at(vec), value(idx));
     } else {
       val = c::index(c::cast(src_vector_element_type(type_id_for(vec)) + "*",
                              c::address_of(materialize(vec, fb))),
@@ -1438,10 +1435,10 @@ c::expr_ref translator_impl::builtin_scalar(SpvBuiltIn builtin) const {
   }
 }
 
-c::expr_ref translator_impl::builtin_vector_extract(uint32_t id,
+c::expr_ref translator_impl::builtin_vector_extract(SpvBuiltIn builtin,
                                                     c::expr_ref idx) const {
   const char *query;
-  switch (m_builtin_values.at(id)) {
+  switch (builtin) {
   case SpvBuiltInGlobalInvocationId:
     query = "get_global_id";
     break;
@@ -1469,16 +1466,17 @@ c::expr_ref translator_impl::builtin_vector_extract(uint32_t id,
   return c::call(query, {std::move(idx)});
 }
 
-c::expr_ref translator_impl::builtin_vector(uint32_t id) const {
-  auto type = type_for_val(id);
-  auto vec = type ? type->AsVector() : nullptr;
+c::expr_ref translator_impl::builtin_value(SpvBuiltIn builtin,
+                                           uint32_t tyid) const {
+  auto vec = type_for(tyid)->AsVector();
   if (!vec) {
-    return c::literal(note_unsupported("non-vector built-in value"));
+    return builtin_scalar(builtin);
   }
   // (typeN)(query(0), query(1), ..., query(N-1))
   std::vector<c::expr_ref> comps;
   for (uint32_t i = 0; i < vec->element_count(); i++) {
-    comps.push_back(builtin_vector_extract(id, c::literal(std::to_string(i))));
+    comps.push_back(
+        builtin_vector_extract(builtin, c::literal(std::to_string(i))));
   }
-  return c::vector_literal(src_type(type_id_for(id)), std::move(comps));
+  return c::vector_literal(src_type(tyid), std::move(comps));
 }

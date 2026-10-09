@@ -1,0 +1,31 @@
+; A built-in used through a module-scope OpSpecConstantOp pointer is declared
+; in the function using that constant, since the constant is bound to an
+; expression naming the built-in.
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Int64
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k" %lid
+               OpName %lid "lid"
+               OpDecorate %lid BuiltIn LocalInvocationId
+       %void = OpTypeVoid
+      %ulong = OpTypeInt 64 0
+    %v3ulong = OpTypeVector %ulong 3
+    %p_in_v3 = OpTypePointer Input %v3ulong
+     %p_g_v3 = OpTypePointer CrossWorkgroup %v3ulong
+    %ulong_0 = OpConstant %ulong 0
+        %lid = OpVariable %p_in_v3 Input
+          %p = OpSpecConstantOp %p_in_v3 PtrAccessChain %lid %ulong_0
+       %fnty = OpTypeFunction %void %p_g_v3
+          %k = OpFunction %void None %fnty
+        %out = OpFunctionParameter %p_g_v3
+      %entry = OpLabel
+          %v = OpLoad %v3ulong %p
+               OpStore %out %v
+               OpReturn
+               OpFunctionEnd
+; CHECK: ulong3 lid_storage = (ulong3)(get_local_id(0), get_local_id(1), get_local_id(2));
+; CHECK: * lid = &lid_storage;
+; CHECK: lid + (ulong)0

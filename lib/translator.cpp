@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <functional>
 #include <set>
 
 using namespace spvtools;
@@ -790,6 +791,41 @@ bool translator_impl::translate_function(Function &func) {
     for (auto lvarid : used_globals_in_local_as) {
       fb.declare_upfront(m_local_variable_decls.at(lvarid));
     }
+  }
+
+  // Built-in variables aren't declared: loads from them are bound to queries
+  // (see OpLoad). A function that uses a built-in's pointer some other way,
+  // e.g. bitcast and offset to load one component, gets a private copy. That
+  // includes uses through module-scope OpSpecConstantOps, which are bound to
+  // expressions naming their operands.
+  std::set<uint32_t> used_builtins;
+  std::function<void(uint32_t)> find_builtins = [&](uint32_t id) {
+    if (m_builtin_variables.count(id)) {
+      used_builtins.insert(id);
+      return;
+    }
+    auto def = m_ir->get_def_use_mgr()->GetDef(id);
+    if (def && def->opcode() == spv::Op::OpSpecConstantOp) {
+      def->ForEachInId([&](const uint32_t *op) { find_builtins(*op); });
+    }
+  };
+  for (auto &bb : func) {
+    for (auto &inst : bb) {
+      if (inst.opcode() == spv::Op::OpLoad &&
+          m_builtin_variables.count(inst.GetSingleWordOperand(2))) {
+        continue;
+      }
+      inst.ForEachInId([&](const uint32_t *id) { find_builtins(*id); });
+    }
+  }
+  for (auto var : used_builtins) {
+    auto tyid = type_id_for(type_for_val(var)->AsPointer()->pointee_type());
+    auto &storagename = derived_name(var, "_storage");
+    fb.declare_upfront(
+        src_var_decl(tyid, storagename) + " = " +
+        c::print(builtin_value(m_builtin_variables.at(var), tyid)));
+    fb.declare_upfront(src_var_decl(var) + " = " +
+                       c::print(c::address_of(c::name(storagename))));
   }
 
   // ByVal parameters are passed by value; the body expects a pointer to it.
