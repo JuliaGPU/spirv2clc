@@ -266,6 +266,10 @@ private:
   // ("add", "inc", ...) from the atomic pointer's pointee width.
   std::string atomic_builtin(const std::string &op, uint32_t ptr) const;
 
+  // `ptr` reinterpreted as a pointer to `ty` in its address space, e.g.
+  // "(volatile global atomic_flag*)v12".
+  c::expr_ref atomic_pointer(uint32_t ptr, const std::string &ty) const;
+
   // `ptr` reinterpreted as a pointer to the C11 atomic type the OpenCL C 2.0
   // atomics operate on, e.g. "(volatile global atomic_uint*)v12". Integers are
   // atomic_uint/ulong, or atomic_int/long for `is_signed`, which selects the

@@ -1,0 +1,32 @@
+; OpAtomicFlagTestAndSet / OpAtomicFlagClear lower to the OpenCL C 2.0 flag
+; builtins on the flag's 32-bit integer storage reinterpreted as atomic_flag,
+; keeping their memory order. OpenCL C 1.x has no ordered atomics.
+; RUN: not %spirv2clc --asm --cl-std=CL1.2 %s
+; RUN: %spirv2clc --asm --cl-std=CL2.0 %s | %FileCheck %s
+; RUN: %spirv2clc --asm --cl-std=CL2.0 %s | %clang -c -cl-std=CL2.0 -x cl - -o /dev/null
+               OpCapability Kernel
+               OpCapability Addresses
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+       %void = OpTypeVoid
+       %bool = OpTypeBool
+       %uint = OpTypeInt 32 0
+         %pg = OpTypePointer CrossWorkgroup %uint
+      %scope = OpConstant %uint 1
+        %acq = OpConstant %uint 2
+        %rel = OpConstant %uint 4
+       %zero = OpConstant %uint 0
+        %one = OpConstant %uint 1
+       %fnty = OpTypeFunction %void %pg %pg
+          %k = OpFunction %void None %fnty
+          %f = OpFunctionParameter %pg
+          %o = OpFunctionParameter %pg
+        %lbl = OpLabel
+        %was = OpAtomicFlagTestAndSet %bool %f %scope %acq
+          %v = OpSelect %uint %was %one %zero
+               OpStore %o %v
+               OpAtomicFlagClear %f %scope %rel
+               OpReturn
+               OpFunctionEnd
+; CHECK: = atomic_flag_test_and_set_explicit((volatile global atomic_flag*){{v[0-9]+}}, memory_order_acquire, memory_scope_device)
+; CHECK: atomic_flag_clear_explicit((volatile global atomic_flag*){{v[0-9]+}}, memory_order_release, memory_scope_device)
