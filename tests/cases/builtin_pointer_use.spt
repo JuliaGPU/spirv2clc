@@ -1,0 +1,74 @@
+; Built-in variables whose pointer is used other than by a direct load get a
+; private copy in the function using them. The LLVM SPIR-V back end emits a
+; bitcast and byte offset to load one component of a vector built-in; a pointer
+; to a scalar built-in can be passed to a function. Built-ins only loaded
+; directly are not declared. The copy is a plain value: decorations of the
+; built-in (here Restrict) don't apply to it.
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s --implicit-check-not=gid_storage
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Int64
+               OpCapability Int8
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k" %lid %wd %gid
+               OpName %lid "lid"
+               OpName %wd "wd"
+               OpName %gid "gid"
+               OpName %load "load"
+               OpDecorate %lid BuiltIn LocalInvocationId
+               OpDecorate %lid Restrict
+               OpDecorate %wd BuiltIn WorkDim
+               OpDecorate %gid BuiltIn GlobalInvocationId
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+      %ulong = OpTypeInt 64 0
+      %uchar = OpTypeInt 8 0
+    %v3ulong = OpTypeVector %ulong 3
+   %p_in_v3 = OpTypePointer Input %v3ulong
+ %p_in_ulong = OpTypePointer Input %ulong
+ %p_in_uchar = OpTypePointer Input %uchar
+  %p_in_uint = OpTypePointer Input %uint
+  %p_g_ulong = OpTypePointer CrossWorkgroup %ulong
+    %ulong_1 = OpConstant %ulong 1
+    %ulong_2 = OpConstant %ulong 2
+    %ulong_8 = OpConstant %ulong 8
+        %lid = OpVariable %p_in_v3 Input
+         %wd = OpVariable %p_in_uint Input
+        %gid = OpVariable %p_in_v3 Input
+     %fty_ld = OpTypeFunction %uint %p_in_uint
+       %fnty = OpTypeFunction %void %p_g_ulong
+       %load = OpFunction %uint None %fty_ld
+          %p = OpFunctionParameter %p_in_uint
+        %lbb = OpLabel
+         %pv = OpLoad %uint %p
+               OpReturnValue %pv
+               OpFunctionEnd
+          %k = OpFunction %void None %fnty
+        %out = OpFunctionParameter %p_g_ulong
+      %entry = OpLabel
+          %b = OpBitcast %p_in_uchar %lid
+          %c = OpInBoundsPtrAccessChain %p_in_uchar %b %ulong_8
+          %d = OpBitcast %p_in_ulong %c
+          %v = OpLoad %ulong %d Aligned 8
+               OpStore %out %v Aligned 8
+          %w = OpFunctionCall %uint %load %wd
+         %wl = OpUConvert %ulong %w
+         %o1 = OpInBoundsPtrAccessChain %p_g_ulong %out %ulong_1
+               OpStore %o1 %wl Aligned 8
+          %g = OpLoad %v3ulong %gid
+         %gx = OpCompositeExtract %ulong %g 0
+         %o2 = OpInBoundsPtrAccessChain %p_g_ulong %out %ulong_2
+               OpStore %o2 %gx Aligned 8
+               OpReturn
+               OpFunctionEnd
+; CHECK-LABEL: load(
+; CHECK-NOT: _storage
+; CHECK-LABEL: void kernel k(
+; CHECK-DAG: ulong3 lid_storage = (ulong3)(get_local_id(0), get_local_id(1), get_local_id(2));
+; CHECK-DAG: * lid = &lid_storage;
+; CHECK-DAG: uint wd_storage = get_work_dim();
+; CHECK-DAG: * wd = &wd_storage;
+; CHECK: (ma{{[0-9]+}} *)lid
+; CHECK: load(wd)
+; CHECK: get_global_id(0)

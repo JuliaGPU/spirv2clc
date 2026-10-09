@@ -349,15 +349,14 @@ private:
   c::expr_ref from_component(uint32_t composite_tyid, uint32_t elem_tyid,
                              c::expr_ref component) const;
 
-  // The query of component `idx` of builtin vector value `id`.
-  c::expr_ref builtin_vector_extract(uint32_t id, c::expr_ref idx) const;
+  // The query of component `idx` of vector built-in `builtin`.
+  c::expr_ref builtin_vector_extract(SpvBuiltIn builtin, c::expr_ref idx) const;
 
-  // A whole vector built-in load (e.g. WorkgroupId) as a vector literal of its
-  // per-dimension queries, used when the load is consumed as a whole value
-  // (OpPhi incoming, store, ...) rather than component-extracted.
-  c::expr_ref builtin_vector(uint32_t id) const;
+  // The whole value of built-in `builtin` of type `tyid`. A vector built-in
+  // (e.g. WorkgroupId) is a vector literal of its per-dimension queries.
+  c::expr_ref builtin_value(SpvBuiltIn builtin, uint32_t tyid) const;
 
-  // The value of a load from scalar built-in variable `builtin`.
+  // The value of scalar built-in `builtin`.
   c::expr_ref builtin_scalar(SpvBuiltIn builtin) const;
 
   std::optional<std::string>
