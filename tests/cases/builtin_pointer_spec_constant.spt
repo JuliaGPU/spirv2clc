@@ -28,4 +28,4 @@
                OpFunctionEnd
 ; CHECK: ulong3 lid_storage = (ulong3)(get_local_id(0), get_local_id(1), get_local_id(2));
 ; CHECK: * lid = &lid_storage;
-; CHECK: lid + (ulong)0
+; CHECK: lid + (long)(ulong)0
