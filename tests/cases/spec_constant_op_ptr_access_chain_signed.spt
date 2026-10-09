@@ -1,0 +1,38 @@
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+; The element index of an OpSpecConstantOp pointer access chain is signed, as
+; in the run-time instruction: a 32-bit 0xFFFFFFFF must step one element back,
+; not add 4294967295 elements.
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Int8
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k"
+       %void = OpTypeVoid
+      %uchar = OpTypeInt 8 0
+       %uint = OpTypeInt 32 0
+     %uint_2 = OpConstant %uint 2
+     %uint_4 = OpConstant %uint 4
+    %uint_m1 = OpConstant %uint 4294967295
+   %uchar_10 = OpConstant %uchar 10
+   %uchar_11 = OpConstant %uchar 11
+   %uchar_12 = OpConstant %uchar 12
+   %uchar_13 = OpConstant %uchar 13
+        %arr = OpTypeArray %uchar %uint_4
+       %parr = OpTypePointer UniformConstant %arr
+         %pc = OpTypePointer UniformConstant %uchar
+         %pg = OpTypePointer CrossWorkgroup %uchar
+       %init = OpConstantComposite %arr %uchar_10 %uchar_11 %uchar_12 %uchar_13
+          %g = OpVariable %parr UniformConstant %init
+         %p0 = OpSpecConstantOp %pc Bitcast %g
+         %p1 = OpSpecConstantOp %pc InBoundsPtrAccessChain %p0 %uint_2
+         %pm = OpSpecConstantOp %pc InBoundsPtrAccessChain %p1 %uint_m1
+       %fnty = OpTypeFunction %void %pg
+          %k = OpFunction %void None %fnty
+        %out = OpFunctionParameter %pg
+         %bb = OpLabel
+          %v = OpLoad %uchar %pm
+               OpStore %out %v
+               OpReturn
+               OpFunctionEnd
+; CHECK: + (int)(uint)2) + (int)(uint)4294967295)

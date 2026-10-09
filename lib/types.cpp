@@ -711,7 +711,7 @@ bool translator_impl::translate_types_values() {
         auto base = inst.GetSingleWordOperand(3);
         auto index = inst.GetSingleWordOperand(4);
         m_bindings[result] =
-            cast_to(rtype, c::binary("+", value(base), value(index)));
+            cast_to(rtype, c::binary("+", value(base), signed_index(index)));
         break;
       }
       default:
