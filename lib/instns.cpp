@@ -1007,11 +1007,11 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     break;
   case spv::Op::OpSatConvertUToS:
     // Unsigned source -> signed dest, saturating (clamps to the signed range).
-    // The operand is taken as-is (unsigned); the destination is the signed
-    // result type (cf. OpConvertFToS, which likewise converts to the signed
-    // type name without reinterpreting the operand).
-    val = call_values("convert_" + src_type_signed(rtype) + "_sat",
-                      {inst.GetSingleWordOperand(2)});
+    // The operand is taken as-is (unsigned); the signed result is
+    // reinterpreted as the (unsigned) result type.
+    val =
+        as_type(rtype, call_values("convert_" + src_type_signed(rtype) + "_sat",
+                                   {inst.GetSingleWordOperand(2)}));
     break;
   case spv::Op::OpBitcast: {
     auto operand = inst.GetSingleWordOperand(2);
@@ -1026,8 +1026,8 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     break;
   }
   case spv::Op::OpSConvert:
-    val = c::call("convert_" + src_type_signed(rtype),
-                  {as_signed(inst.GetSingleWordOperand(2))});
+    val = as_type(rtype, c::call("convert_" + src_type_signed(rtype),
+                                 {as_signed(inst.GetSingleWordOperand(2))}));
     break;
   case spv::Op::OpFConvert:
   case spv::Op::OpUConvert:
