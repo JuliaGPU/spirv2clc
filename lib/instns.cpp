@@ -958,11 +958,15 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     }
 
     val = c::call(fn, {value(op)});
+    if (opcode == spv::Op::OpConvertFToS) {
+      val = as_type(rtype, val);
+    }
 
     // SPIR-V requires that NaNs be converted to 0 for saturating conversions
     // but OpenCL C just recommends it (§6.2.3)
     if (sat) {
-      val = c::ternary(call_values("isnan", {op}), c::literal("0"), val);
+      auto is_nan = relational_mask(op, call_values("isnan", {op}));
+      val = c::ternary(select_mask(is_nan, rtype), null_constant(rtype), val);
     }
 
     break;

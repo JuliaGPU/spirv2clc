@@ -46,7 +46,7 @@
                OpReturn
                OpFunctionEnd
 ; CHECK: = convert_uint_rtz(
-; CHECK: = convert_int_rtz(
+; CHECK: = as_uint(convert_int_rtz(
 ; OpSatConvertSToU: signed source (as_int) -> unsigned (ushort) dest
 ; CHECK: = convert_ushort_sat(as_int(
 ; OpSatConvertUToS: unsigned source -> signed (short) dest
