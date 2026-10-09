@@ -611,6 +611,8 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     }
     break;
   }
+  // SPIR-V gives the weak exchange the semantics of the strong one.
+  case spv::Op::OpAtomicCompareExchangeWeak:
   case spv::Op::OpAtomicCompareExchange: {
     auto ptr = inst.GetSingleWordOperand(2);
     auto scope = constant_operand(inst.GetSingleWordOperand(3), "atomic scope");

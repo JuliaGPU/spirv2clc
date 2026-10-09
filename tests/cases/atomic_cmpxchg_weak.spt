@@ -1,0 +1,28 @@
+; OpAtomicCompareExchangeWeak has the semantics of OpAtomicCompareExchange (it
+; may not fail spuriously), so it lowers to the same strong exchange. SPIR-V 1.4
+; deprecates it, hence the older SPIR-V version.
+; RUN: %spirv2clc --asm --spirv-version=1.2 --cl-std=CL1.2 %s | %FileCheck %s --check-prefix=CL12
+; RUN: %spirv2clc --asm --spirv-version=1.2 --cl-std=CL1.2 %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm --spirv-version=1.2 --cl-std=CL2.0 %s | %FileCheck %s --check-prefix=CL20
+; RUN: %spirv2clc --asm --spirv-version=1.2 --cl-std=CL2.0 %s | %clang -c -cl-std=CL2.0 -x cl - -o /dev/null
+               OpCapability Kernel
+               OpCapability Addresses
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+         %pg = OpTypePointer CrossWorkgroup %uint
+      %scope = OpConstant %uint 1
+        %sem = OpConstant %uint 0
+        %cmp = OpConstant %uint 7
+        %val = OpConstant %uint 9
+       %fnty = OpTypeFunction %void %pg
+          %k = OpFunction %void None %fnty
+          %p = OpFunctionParameter %pg
+        %lbl = OpLabel
+        %old = OpAtomicCompareExchangeWeak %uint %p %scope %sem %sem %val %cmp
+               OpStore %p %old
+               OpReturn
+               OpFunctionEnd
+; CL12: = atomic_cmpxchg({{v[0-9]+}}, (uint)7, (uint)9)
+; CL20: atomic_compare_exchange_strong_explicit((volatile global atomic_uint*){{v[0-9]+}}, &{{v[0-9]+}}, (uint)9, memory_order_relaxed, memory_order_relaxed, memory_scope_device)
