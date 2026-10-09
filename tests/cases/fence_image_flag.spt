@@ -1,0 +1,24 @@
+; LLVM sets ImageMemory (0x800) on the semantics of every fence and barrier, but
+; CLK_IMAGE_MEM_FENCE only exists from OpenCL C 2.0 on. Before that, a kernel
+; can't both write and read an image, so the flag can be left out.
+; (0xB10 = 2832 is SequentiallyConsistent | Workgroup | CrossWorkgroup | Image.)
+; RUN: %spirv2clc --asm --cl-std=CL1.2 %s | %FileCheck %s --check-prefix=CL12
+; RUN: %spirv2clc --asm --cl-std=CL1.2 %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm --cl-std=CL2.0 %s | %FileCheck %s --check-prefix=CL20
+; RUN: %spirv2clc --asm --cl-std=CL2.0 %s | %clang -c -cl-std=CL2.0 -x cl - -o /dev/null
+               OpCapability Kernel
+               OpCapability Addresses
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+         %wg = OpConstant %uint 2
+        %sem = OpConstant %uint 2832
+       %fnty = OpTypeFunction %void
+          %k = OpFunction %void None %fnty
+        %lbl = OpLabel
+               OpControlBarrier %wg %wg %sem
+               OpReturn
+               OpFunctionEnd
+; CL12: barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE);
+; CL20: barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE | CLK_IMAGE_MEM_FENCE);

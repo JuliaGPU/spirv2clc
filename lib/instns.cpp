@@ -85,23 +85,145 @@ std::string translator_impl::atomic_builtin(const std::string &op,
   return (is64 ? "atom_" : "atomic_") + op;
 }
 
-c::expr_ref translator_impl::atomic_c11_pointer(uint32_t ptr) const {
+c::expr_ref translator_impl::atomic_c11_pointer(uint32_t ptr,
+                                                bool is_signed) const {
   auto ptrty = type_for_val(ptr)->AsPointer();
   auto pointee = ptrty->pointee_type();
   std::string ty;
   if (pointee->kind() == Type::Kind::kFloat) {
     ty = pointee->AsFloat()->width() == 64 ? "atomic_double" : "atomic_float";
   } else {
-    auto i = pointee->AsInteger();
-    bool is64 = i->width() == 64;
-    ty = is64 ? (i->IsSigned() ? "atomic_long" : "atomic_ulong")
-              : (i->IsSigned() ? "atomic_int" : "atomic_uint");
+    bool is64 = pointee->AsInteger()->width() == 64;
+    ty = is64 ? (is_signed ? "atomic_long" : "atomic_ulong")
+              : (is_signed ? "atomic_int" : "atomic_uint");
   }
   std::string as =
       address_space_qualifier(static_cast<uint32_t>(ptrty->storage_class()));
   return c::cast("volatile " + (as.empty() ? "" : as + " ") + ty + "*",
                  value(ptr));
 }
+
+std::optional<uint32_t>
+translator_impl::constant_operand(uint32_t id, const char *what) const {
+  auto cst = m_ir->get_constant_mgr()->FindDeclaredConstant(id);
+  if (cst == nullptr) {
+    std::cerr << "UNIMPLEMENTED non-constant " << what << std::endl;
+    return std::nullopt;
+  }
+  return cst->GetU32();
+}
+
+c::expr_ref translator_impl::memory_scope(uint32_t scope) const {
+  switch (scope) {
+  case SpvScopeCrossDevice:
+    return c::name("memory_scope_all_svm_devices");
+  case SpvScopeDevice:
+    return c::name("memory_scope_device");
+  case SpvScopeWorkgroup:
+  // A wider scope is always correct, and these narrower ones are restricted:
+  // memory_scope_work_item to image fences, memory_scope_sub_group to devices
+  // with sub-groups.
+  case SpvScopeSubgroup:
+  case SpvScopeInvocation:
+    return c::name("memory_scope_work_group");
+  default:
+    std::cerr << "UNIMPLEMENTED memory scope " << scope << std::endl;
+    return nullptr;
+  }
+}
+
+namespace {
+
+// The memory orders of OpenCL C 2.0, which match those of SPIR-V.
+enum class memory_order { relaxed, acquire, release, acq_rel, seq_cst };
+
+memory_order order_of(uint32_t mem_sem) {
+  if (mem_sem & SpvMemorySemanticsSequentiallyConsistentMask) {
+    return memory_order::seq_cst;
+  }
+  if (mem_sem & SpvMemorySemanticsAcquireReleaseMask) {
+    return memory_order::acq_rel;
+  }
+  if (mem_sem & SpvMemorySemanticsReleaseMask) {
+    return memory_order::release;
+  }
+  if (mem_sem & SpvMemorySemanticsAcquireMask) {
+    return memory_order::acquire;
+  }
+  return memory_order::relaxed;
+}
+
+c::expr_ref spell(memory_order order) {
+  switch (order) {
+  case memory_order::relaxed:
+    return c::name("memory_order_relaxed");
+  case memory_order::acquire:
+    return c::name("memory_order_acquire");
+  case memory_order::release:
+    return c::name("memory_order_release");
+  case memory_order::acq_rel:
+    return c::name("memory_order_acq_rel");
+  case memory_order::seq_cst:
+    return c::name("memory_order_seq_cst");
+  }
+  return nullptr;
+}
+
+// OpenCL C rejects orders that don't apply to an operation, e.g. release on a
+// load, which SPIR-V allows; drop the half that has no effect.
+memory_order without_release(memory_order order) {
+  switch (order) {
+  case memory_order::release:
+    return memory_order::relaxed;
+  case memory_order::acq_rel:
+    return memory_order::acquire;
+  default:
+    return order;
+  }
+}
+
+memory_order without_acquire(memory_order order) {
+  switch (order) {
+  case memory_order::acquire:
+    return memory_order::relaxed;
+  case memory_order::acq_rel:
+    return memory_order::release;
+  default:
+    return order;
+  }
+}
+
+// How many work-items a scope spans, relative to the others.
+int scope_width(uint32_t scope) {
+  switch (scope) {
+  case SpvScopeInvocation:
+    return 0;
+  case SpvScopeSubgroup:
+    return 1;
+  case SpvScopeWorkgroup:
+    return 2;
+  case SpvScopeDevice:
+    return 3;
+  default: // CrossDevice, and scopes OpenCL C doesn't know
+    return 4;
+  }
+}
+
+// The weakest order at least as strong as both `a` and `b`.
+memory_order join(memory_order a, memory_order b) {
+  if (a == b || b == memory_order::relaxed) {
+    return a;
+  }
+  if (a == memory_order::relaxed) {
+    return b;
+  }
+  if (a == memory_order::seq_cst || b == memory_order::seq_cst) {
+    return memory_order::seq_cst;
+  }
+  return memory_order::acq_rel;
+}
+
+} // namespace
 
 c::expr_ref translator_impl::fence_flags(uint32_t mem_sem) const {
   c::expr_ref flags;
@@ -114,7 +236,10 @@ c::expr_ref translator_impl::fence_flags(uint32_t mem_sem) const {
   if (mem_sem & SpvMemorySemanticsCrossWorkgroupMemoryMask) {
     add("CLK_GLOBAL_MEM_FENCE");
   }
-  if (mem_sem & SpvMemorySemanticsImageMemoryMask) {
+  // CLK_IMAGE_MEM_FENCE is OpenCL C 2.0. Before that, a kernel can't both write
+  // and read an image, so there are no image accesses to order.
+  if ((mem_sem & SpvMemorySemanticsImageMemoryMask) &&
+      m_opencl_c_version >= 200) {
     add("CLK_IMAGE_MEM_FENCE");
   }
   // Semantics with only an ordering (or subgroup memory, which has no OpenCL C
@@ -382,18 +507,8 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     val = c::vector_literal(src_type(rtype), dims);
     break;
   }
-  case spv::Op::OpAtomicIIncrement: {
-    auto ptr = inst.GetSingleWordOperand(2);
-    val =
-        call_values(atomic_builtin("inc", ptr), {ptr}); // FIXME exact semantics
-    break;
-  }
-  case spv::Op::OpAtomicIDecrement: {
-    auto ptr = inst.GetSingleWordOperand(2);
-    val =
-        call_values(atomic_builtin("dec", ptr), {ptr}); // FIXME exact semantics
-    break;
-  }
+  case spv::Op::OpAtomicIIncrement:
+  case spv::Op::OpAtomicIDecrement:
   case spv::Op::OpAtomicAnd:
   case spv::Op::OpAtomicExchange:
   case spv::Op::OpAtomicIAdd:
@@ -403,8 +518,74 @@ bool translator_impl::translate_instruction(const Instruction &inst,
   case spv::Op::OpAtomicSMin:
   case spv::Op::OpAtomicUMax:
   case spv::Op::OpAtomicUMin:
-  case spv::Op::OpAtomicXor: {
+  case spv::Op::OpAtomicXor:
+  case spv::Op::OpAtomicFAddEXT: {
+    auto ptr = inst.GetSingleWordOperand(2);
+    auto scope = constant_operand(inst.GetSingleWordOperand(3), "atomic scope");
+    auto mem_sem =
+        constant_operand(inst.GetSingleWordOperand(4), "atomic semantics");
+    if (!scope || !mem_sem) {
+      return false;
+    }
+    bool is_signed =
+        opcode == spv::Op::OpAtomicSMax || opcode == spv::Op::OpAtomicSMin;
+    // Increment and decrement have no operand: they add or subtract one.
+    bool has_operand = opcode != spv::Op::OpAtomicIIncrement &&
+                       opcode != spv::Op::OpAtomicIDecrement;
+    c::expr_ref operand;
+    if (!has_operand) {
+      operand = cast_to(rtype, c::literal("1"));
+    } else if (is_signed) {
+      operand = as_signed(inst.GetSingleWordOperand(5));
+    } else {
+      operand = value(inst.GetSingleWordOperand(5));
+    }
+    if (m_opencl_c_version >= 200) {
+      static std::unordered_map<spv::Op, const char *> fns{
+          {spv::Op::OpAtomicIIncrement, "atomic_fetch_add_explicit"},
+          {spv::Op::OpAtomicIDecrement, "atomic_fetch_sub_explicit"},
+          {spv::Op::OpAtomicAnd, "atomic_fetch_and_explicit"},
+          {spv::Op::OpAtomicExchange, "atomic_exchange_explicit"},
+          {spv::Op::OpAtomicIAdd, "atomic_fetch_add_explicit"},
+          {spv::Op::OpAtomicISub, "atomic_fetch_sub_explicit"},
+          {spv::Op::OpAtomicOr, "atomic_fetch_or_explicit"},
+          {spv::Op::OpAtomicSMax, "atomic_fetch_max_explicit"},
+          {spv::Op::OpAtomicSMin, "atomic_fetch_min_explicit"},
+          {spv::Op::OpAtomicUMax, "atomic_fetch_max_explicit"},
+          {spv::Op::OpAtomicUMin, "atomic_fetch_min_explicit"},
+          {spv::Op::OpAtomicXor, "atomic_fetch_xor_explicit"},
+          {spv::Op::OpAtomicFAddEXT, "atomic_fetch_add_explicit"},
+      };
+      auto scope_arg = memory_scope(*scope);
+      if (!scope_arg) {
+        return false;
+      }
+      val =
+          c::call(fns.at(opcode), {atomic_c11_pointer(ptr, is_signed), operand,
+                                   spell(order_of(*mem_sem)), scope_arg});
+      if (is_signed) {
+        val = as_type(rtype, val);
+      }
+      break;
+    }
+    // The OpenCL C 1.x atomics are relaxed. OpenCL C 1.x has no scopes: they
+    // are atomic for every work-item accessing the memory, which is as wide as
+    // any scope gets without shared virtual memory.
+    if (order_of(*mem_sem) != memory_order::relaxed) {
+      std::cerr << "UNIMPLEMENTED: ordered atomics require OpenCL C 2.0 "
+                   "(targeting "
+                << opencl_c_version_str(m_opencl_c_version) << ").\n";
+      return false;
+    }
+    if (opcode == spv::Op::OpAtomicFAddEXT) {
+      std::cerr << "UNIMPLEMENTED: floating-point atomics require OpenCL C "
+                   "2.0 (targeting "
+                << opencl_c_version_str(m_opencl_c_version) << ").\n";
+      return false;
+    }
     static std::unordered_map<spv::Op, const char *> fns{
+        {spv::Op::OpAtomicIIncrement, "inc"},
+        {spv::Op::OpAtomicIDecrement, "dec"},
         {spv::Op::OpAtomicAnd, "and"},
         {spv::Op::OpAtomicExchange, "xchg"},
         {spv::Op::OpAtomicIAdd, "add"},
@@ -416,62 +597,93 @@ bool translator_impl::translate_instruction(const Instruction &inst,
         {spv::Op::OpAtomicUMin, "min"},
         {spv::Op::OpAtomicXor, "xor"},
     };
-    auto ptr = inst.GetSingleWordOperand(2);
-    auto operand = inst.GetSingleWordOperand(5);
     auto fn = atomic_builtin(fns.at(opcode), ptr);
-    if (opcode == spv::Op::OpAtomicSMax || opcode == spv::Op::OpAtomicSMin) {
+    if (!has_operand) {
+      val = call_values(fn, {ptr});
+    } else if (is_signed) {
       // Integers are spelled unsigned, so the signed comparison needs the
       // signed overload: reinterpret the operands and convert the result back.
-      val = as_type(rtype,
-                    c::call(fn, {cast_to_signed(type_id_for(ptr), value(ptr)),
-                                 as_signed(operand)}));
+      val = as_type(
+          rtype,
+          c::call(fn, {cast_to_signed(type_id_for(ptr), value(ptr)), operand}));
     } else {
-      val = call_values(fn, {ptr, operand}); // FIXME exact semantics
+      val = c::call(fn, {value(ptr), operand});
     }
     break;
   }
   case spv::Op::OpAtomicCompareExchange: {
     auto ptr = inst.GetSingleWordOperand(2);
+    auto scope = constant_operand(inst.GetSingleWordOperand(3), "atomic scope");
+    auto sem_equal =
+        constant_operand(inst.GetSingleWordOperand(4), "atomic semantics");
+    auto sem_unequal =
+        constant_operand(inst.GetSingleWordOperand(5), "atomic semantics");
     auto desired = inst.GetSingleWordOperand(6);
     auto cmp = inst.GetSingleWordOperand(7);
-    val = call_values(atomic_builtin("cmpxchg", ptr),
-                      {ptr, cmp, desired}); // FIXME exact semantics
-    break;
-  }
-  case spv::Op::OpAtomicFAddEXT: {
-    // Floating-point atomic add (cl_ext_float_atomics). Unlike the integer
-    // atomics, OpenCL C has no legacy atomic_add(float*, float): float/double
-    // atomics are only exposed through the C11 atomic_fetch_add on an
-    // atomic_float/atomic_double operand. A plain atomic_add/atomic_fetch_add on
-    // a float* is ambiguous (it considers the integer overloads), so spell the
-    // C11 form and reinterpret the pointer as the matching atomic type. The
-    // value is the same bit width and layout, so the cast is sound.
-    auto ptr = inst.GetSingleWordOperand(2);
-    auto operand = inst.GetSingleWordOperand(5);
-    val =
-        c::call("atomic_fetch_add", {atomic_c11_pointer(ptr),
-                                     value(operand)}); // FIXME exact semantics
+    if (!scope || !sem_equal || !sem_unequal) {
+      return false;
+    }
+    if (m_opencl_c_version >= 200) {
+      auto scope_arg = memory_scope(*scope);
+      if (!scope_arg) {
+        return false;
+      }
+      // OpenCL C requires the failure order to be no stronger than the success
+      // order; SPIR-V doesn't (it only forbids a releasing failure order).
+      auto failure = order_of(*sem_unequal);
+      auto success = join(order_of(*sem_equal), failure);
+      // The expected value is passed by address and overwritten with the value
+      // found, which is the result: so the result variable can hold it.
+      fb.declare(src_var_decl(result), value(cmp));
+      fb.expression(c::call(
+          "atomic_compare_exchange_strong_explicit",
+          {atomic_c11_pointer(ptr), c::address_of(c::name(name_of(result))),
+           value(desired), spell(success), spell(failure), scope_arg}));
+      assign_result = false;
+      break;
+    }
+    if (order_of(*sem_equal) != memory_order::relaxed ||
+        order_of(*sem_unequal) != memory_order::relaxed) {
+      std::cerr << "UNIMPLEMENTED: ordered atomics require OpenCL C 2.0 "
+                   "(targeting "
+                << opencl_c_version_str(m_opencl_c_version) << ").\n";
+      return false;
+    }
+    val = call_values(atomic_builtin("cmpxchg", ptr), {ptr, cmp, desired});
     break;
   }
   case spv::Op::OpAtomicLoad:
   case spv::Op::OpAtomicStore: {
-    // OpenCL C has no legacy atomic_load/atomic_store; only the C11 forms exist
-    // (OpenCL C 2.0+), operating on a reinterpreted atomic pointer like
-    // OpAtomicFAddEXT. The scope/semantics operands are ignored, as elsewhere.
+    // OpenCL C 1.x has no atomic loads and stores.
     if (m_opencl_c_version < 200) {
       std::cerr << "UNIMPLEMENTED: atomic load/store require OpenCL C 2.0 "
                    "(targeting "
                 << opencl_c_version_str(m_opencl_c_version) << ").\n";
       return false;
     }
-    if (opcode == spv::Op::OpAtomicLoad) {
-      auto ptr = inst.GetSingleWordOperand(2);
-      val = c::call("atomic_load", {atomic_c11_pointer(ptr)});
+    bool is_load = opcode == spv::Op::OpAtomicLoad;
+    auto ptr = inst.GetSingleWordOperand(is_load ? 2 : 0);
+    auto scope = constant_operand(inst.GetSingleWordOperand(is_load ? 3 : 1),
+                                  "atomic scope");
+    auto mem_sem = constant_operand(inst.GetSingleWordOperand(is_load ? 4 : 2),
+                                    "atomic semantics");
+    if (!scope || !mem_sem) {
+      return false;
+    }
+    auto scope_arg = memory_scope(*scope);
+    if (!scope_arg) {
+      return false;
+    }
+    if (is_load) {
+      val = c::call("atomic_load_explicit",
+                    {atomic_c11_pointer(ptr),
+                     spell(without_release(order_of(*mem_sem))), scope_arg});
     } else {
-      auto ptr = inst.GetSingleWordOperand(0);
       auto stored = inst.GetSingleWordOperand(3);
       fb.expression(
-          c::call("atomic_store", {atomic_c11_pointer(ptr), value(stored)}));
+          c::call("atomic_store_explicit",
+                  {atomic_c11_pointer(ptr), value(stored),
+                   spell(without_acquire(order_of(*mem_sem))), scope_arg}));
     }
     break;
   }
@@ -865,69 +1077,116 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     break;
   }
   case spv::Op::OpControlBarrier: {
-    auto execution_scope = inst.GetSingleWordOperand(0);
-    auto memory_scope = inst.GetSingleWordOperand(1);
-    auto memory_semantics = inst.GetSingleWordOperand(2);
-
-    auto cstmgr = m_ir->get_constant_mgr();
-
-    auto exec_scope_cst = cstmgr->FindDeclaredConstant(execution_scope);
-    if (exec_scope_cst == nullptr) {
-      std::cerr
-          << "UNIMPLEMENTED OpControlBarrier with non-constant execution scope"
-          << std::endl;
+    auto exec_scope = constant_operand(inst.GetSingleWordOperand(0),
+                                       "OpControlBarrier execution scope");
+    auto mem_scope = constant_operand(inst.GetSingleWordOperand(1),
+                                      "OpControlBarrier memory scope");
+    auto mem_sem = constant_operand(inst.GetSingleWordOperand(2),
+                                    "OpControlBarrier memory semantics");
+    if (!exec_scope || !mem_scope || !mem_sem) {
       return false;
     }
 
     // The execution scope selects the barrier: work-group (barrier) vs
     // sub-group (sub_group_barrier, cl_khr_subgroups).
-    auto exec_scope = exec_scope_cst->GetU32();
-    const char *barrier_fn;
-    if (exec_scope == SpvScopeWorkgroup) {
-      barrier_fn = "barrier";
-    } else if (exec_scope == SpvScopeSubgroup) {
-      barrier_fn = "sub_group_barrier";
+    bool work_group;
+    if (*exec_scope == SpvScopeWorkgroup) {
+      work_group = true;
+    } else if (*exec_scope == SpvScopeSubgroup) {
+      work_group = false;
     } else {
       std::cerr << "UNIMPLEMENTED OpControlBarrier execution scope "
-                << exec_scope << std::endl;
-      return false;
-    }
-
-    auto mem_scope_cst = cstmgr->FindDeclaredConstant(memory_scope);
-    if (mem_scope_cst == nullptr) {
-      std::cerr
-          << "UNIMPLEMENTED OpControlBarrier with non-constant memory scope"
-          << std::endl;
-      return false;
-    }
-
-    auto mem_sem_cst = cstmgr->FindDeclaredConstant(memory_semantics);
-    if (mem_sem_cst == nullptr) {
-      std::cerr
-          << "UNIMPLEMENTED OpControlBarrier with non-constant memory semantics"
-          << std::endl;
+                << *exec_scope << std::endl;
       return false;
     }
 
     // The fence flags come from the memory semantics (Workgroup memory -> local
-    // fence, CrossWorkgroup memory -> global fence), not the memory scope.
-    fb.expression(c::call(barrier_fn, {fence_flags(mem_sem_cst->GetU32())}));
+    // fence, CrossWorkgroup memory -> global fence). The barrier fences memory
+    // at its own scope unless given a wider one, which takes OpenCL C 2.0.
+    if (scope_width(*mem_scope) <= scope_width(*exec_scope)) {
+      fb.expression(c::call(work_group ? "barrier" : "sub_group_barrier",
+                            {fence_flags(*mem_sem)}));
+      break;
+    }
+    if (m_opencl_c_version < 200) {
+      std::cerr << "UNIMPLEMENTED: barriers fencing beyond the work-group "
+                   "require OpenCL C 2.0 (targeting "
+                << opencl_c_version_str(m_opencl_c_version) << ").\n";
+      return false;
+    }
+    auto scope_arg = memory_scope(*mem_scope);
+    if (!scope_arg) {
+      return false;
+    }
+    // work_group_barrier only fences image memory at the scope of the
+    // work-group, so that takes a barrier of its own. Only accesses to
+    // read-write images need it.
+    auto mem_sem_scoped = *mem_sem;
+    if (work_group) {
+      mem_sem_scoped &= ~SpvMemorySemanticsImageMemoryMask;
+      if ((*mem_sem & SpvMemorySemanticsImageMemoryMask) &&
+          m_read_write_images) {
+        fb.expression(c::call(
+            "barrier", {fence_flags(SpvMemorySemanticsImageMemoryMask)}));
+      }
+    }
+    fb.expression(
+        c::call(work_group ? "work_group_barrier" : "sub_group_barrier",
+                {fence_flags(mem_sem_scoped), scope_arg}));
     break;
   }
   case spv::Op::OpMemoryBarrier: {
-    // Standalone fence: operands <Memory scope> <Memory Semantics>. Map to
-    // mem_fence with the corresponding CLK_*_MEM_FENCE flags.
-    auto memory_semantics = inst.GetSingleWordOperand(1);
-    auto mem_sem_cst =
-        m_ir->get_constant_mgr()->FindDeclaredConstant(memory_semantics);
-    if (mem_sem_cst == nullptr) {
-      std::cerr
-          << "UNIMPLEMENTED OpMemoryBarrier with non-constant memory semantics"
-          << std::endl;
+    auto scope = constant_operand(inst.GetSingleWordOperand(0),
+                                  "OpMemoryBarrier memory scope");
+    auto mem_sem = constant_operand(inst.GetSingleWordOperand(1),
+                                    "OpMemoryBarrier memory semantics");
+    if (!scope || !mem_sem) {
       return false;
     }
     assign_result = false;
-    fb.expression(c::call("mem_fence", {fence_flags(mem_sem_cst->GetU32())}));
+    auto order = order_of(*mem_sem);
+    // A relaxed fence orders nothing.
+    if (order == memory_order::relaxed) {
+      break;
+    }
+    // mem_fence orders memory within the work-group.
+    if (m_opencl_c_version < 200) {
+      if (scope_width(*scope) > scope_width(SpvScopeWorkgroup)) {
+        std::cerr << "UNIMPLEMENTED: fences beyond the work-group require "
+                     "OpenCL C 2.0 (targeting "
+                  << opencl_c_version_str(m_opencl_c_version) << ").\n";
+        return false;
+      }
+      fb.expression(c::call("mem_fence", {fence_flags(*mem_sem)}));
+      break;
+    }
+    auto scope_arg = memory_scope(*scope);
+    if (!scope_arg) {
+      return false;
+    }
+    // OpenCL C only fences image memory within a work-item (across work-items
+    // that takes a barrier), with its own fence. That orders accesses to
+    // read-write images, and devices without them reject the fence.
+    bool image_fence = (*mem_sem & SpvMemorySemanticsImageMemoryMask) &&
+                       *scope == SpvScopeInvocation && m_read_write_images;
+    if (image_fence) {
+      fb.expression(c::call("atomic_work_item_fence",
+                            {c::name("CLK_IMAGE_MEM_FENCE"),
+                             c::name("memory_order_acq_rel"),
+                             c::name("memory_scope_work_item")}));
+    }
+    // Flags naming no memory are undefined behavior in atomic_work_item_fence,
+    // so fence all memory instead.
+    auto memory = *mem_sem & (SpvMemorySemanticsWorkgroupMemoryMask |
+                              SpvMemorySemanticsCrossWorkgroupMemoryMask);
+    if (memory == 0 && !image_fence) {
+      memory = SpvMemorySemanticsWorkgroupMemoryMask |
+               SpvMemorySemanticsCrossWorkgroupMemoryMask;
+    }
+    if (memory != 0) {
+      fb.expression(c::call("atomic_work_item_fence",
+                            {fence_flags(memory), spell(order), scope_arg}));
+    }
     break;
   }
   case spv::Op::OpGroupNonUniformShuffle:

@@ -429,6 +429,7 @@ bool translator_impl::translate_type(const Instruction &inst) {
       break;
     case SpvAccessQualifierReadWrite:
       typestr = "read_write";
+      m_read_write_images = true;
       break;
     default:
       std::cerr << "UNIMPLEMENTED image access qualifier " << qual << std::endl;

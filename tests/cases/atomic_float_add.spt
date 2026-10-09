@@ -2,10 +2,12 @@
 ; OpenCL C has no legacy atomic_add(float*, float): float/double atomics are only
 ; exposed through the C11 atomic_fetch_add on an atomic_float/atomic_double
 ; operand (a plain atomic_add/atomic_fetch_add on a float* is ambiguous against
-; the integer overloads). So reinterpret the pointer as the matching atomic type.
+; the integer overloads). So reinterpret the pointer as the matching atomic type,
+; which needs OpenCL C 2.0.
 ; (No %clang run: stock clang's default target doesn't expose float atomics;
 ; pocl, which advertises cl_ext_float_atomics, exercises this end to end.)
-; RUN: %spirv2clc --asm --spirv-version=1.4 %s | %FileCheck %s
+; RUN: not %spirv2clc --asm --spirv-version=1.4 --cl-std=CL1.2 %s
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL3.0 %s | %FileCheck %s
                OpCapability Kernel
                OpCapability Addresses
                OpCapability Float64
@@ -40,5 +42,5 @@
                OpReturn
                OpFunctionEnd
 ; CHECK: #pragma OPENCL EXTENSION cl_ext_float_atomics : enable
-; CHECK: = atomic_fetch_add((volatile global atomic_float*){{.*}},
-; CHECK: = atomic_fetch_add((volatile global atomic_double*){{.*}},
+; CHECK: = atomic_fetch_add_explicit((volatile global atomic_float*){{.*}}, memory_order_relaxed, memory_scope_device)
+; CHECK: = atomic_fetch_add_explicit((volatile global atomic_double*){{.*}}, memory_order_relaxed, memory_scope_device)

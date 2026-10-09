@@ -1,0 +1,50 @@
+; From OpenCL C 2.0 on, OpMemoryBarrier lowers to atomic_work_item_fence with
+; the order and scope of its operands. The semantics are those GPUCompiler
+; emits for fences: an order bit with Subgroup, Workgroup, CrossWorkgroup and
+; Image memory (0xB80), e.g. 0xB84 = 2948 for release. OpenCL C only fences
+; images within a work-item, and only read-write ones need that (see
+; fence_image_read_write.spt), so the image flag is dropped here. A fence naming
+; no other memory fences all of it, and a relaxed fence orders nothing. A barrier with a memory scope wider than its
+; execution scope becomes work_group_barrier with that scope.
+; RUN: not %spirv2clc --asm --cl-std=CL1.2 %s 2>&1 | %FileCheck %s --check-prefix=CL12
+; RUN: %spirv2clc --asm --cl-std=CL2.0 %s | %FileCheck %s
+; RUN: %spirv2clc --asm --cl-std=CL2.0 %s | %clang -c -cl-std=CL2.0 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm --cl-std=CL3.0 %s | %clang -c -cl-std=CL3.0 -x cl - -o /dev/null
+               OpCapability Kernel
+               OpCapability Addresses
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+%crossdevice = OpConstant %uint 0
+     %device = OpConstant %uint 1
+  %workgroup = OpConstant %uint 2
+ %invocation = OpConstant %uint 4
+    %acquire = OpConstant %uint 2946
+    %release = OpConstant %uint 2948
+     %seqcst = OpConstant %uint 2960
+%acqrel_none = OpConstant %uint 8
+%acqrel_image = OpConstant %uint 2056
+    %relaxed = OpConstant %uint 2944
+ %barriersem = OpConstant %uint 2832
+       %fnty = OpTypeFunction %void
+          %k = OpFunction %void None %fnty
+         %bb = OpLabel
+               OpMemoryBarrier %device %release
+               OpMemoryBarrier %crossdevice %acquire
+               OpMemoryBarrier %workgroup %acqrel_none
+               OpMemoryBarrier %invocation %acqrel_image
+               OpMemoryBarrier %invocation %seqcst
+               OpMemoryBarrier %device %relaxed
+               OpControlBarrier %workgroup %device %barriersem
+               OpControlBarrier %workgroup %workgroup %barriersem
+               OpReturn
+               OpFunctionEnd
+; CL12: UNIMPLEMENTED: fences beyond the work-group require OpenCL C 2.0 (targeting 1.2).
+; CHECK:      atomic_work_item_fence(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE, memory_order_release, memory_scope_device);
+; CHECK-NEXT: atomic_work_item_fence(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE, memory_order_acquire, memory_scope_all_svm_devices);
+; CHECK-NEXT: atomic_work_item_fence(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE, memory_order_acq_rel, memory_scope_work_group);
+; CHECK-NEXT: atomic_work_item_fence(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE, memory_order_acq_rel, memory_scope_work_group);
+; CHECK-NEXT: atomic_work_item_fence(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE, memory_order_seq_cst, memory_scope_work_group);
+; CHECK-NEXT: work_group_barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE, memory_scope_device);
+; CHECK-NEXT: barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE | CLK_IMAGE_MEM_FENCE);
