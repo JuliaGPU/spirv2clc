@@ -447,6 +447,13 @@ bool translator_impl::translate_type(const Instruction &inst) {
       break;
     case SpvDim3D:
       typestr += "image3d_t";
+      // Core in OpenCL C 2.0. Non-aggregate types are unique, so this is
+      // emitted at most once.
+      if (qual == SpvAccessQualifierWriteOnly && m_opencl_c_version < 200) {
+        m_out.extensions
+            << "#pragma OPENCL EXTENSION cl_khr_3d_image_writes : enable"
+            << std::endl;
+      }
       break;
     default:
       std::cerr << "UNIMPLEMENTED image dimensionality " << dim << std::endl;

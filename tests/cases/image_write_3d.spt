@@ -1,0 +1,29 @@
+; Writing 3D images takes cl_khr_3d_image_writes below OpenCL C 2.0, where it
+; became core.
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm --cl-std=CL2.0 %s | %FileCheck %s --check-prefix=CL20
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability ImageBasic
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+      %float = OpTypeFloat 32
+     %v4uint = OpTypeVector %uint 4
+    %v4float = OpTypeVector %float 4
+         %wo = OpTypeImage %void 3D 0 0 0 0 Unknown WriteOnly
+     %uint_0 = OpConstant %uint 0
+         %c4 = OpConstantComposite %v4uint %uint_0 %uint_0 %uint_0 %uint_0
+          %t = OpConstantNull %v4float
+       %fnty = OpTypeFunction %void %wo
+          %k = OpFunction %void None %fnty
+          %w = OpFunctionParameter %wo
+         %bb = OpLabel
+               OpImageWrite %w %c4 %t
+               OpReturn
+               OpFunctionEnd
+; CHECK: #pragma OPENCL EXTENSION cl_khr_3d_image_writes : enable
+; CHECK: write_imagef({{.*}}, as_int4(
+; CL20-NOT: cl_khr_3d_image_writes
