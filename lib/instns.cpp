@@ -268,6 +268,124 @@ c::expr_ref translator_impl::dereference(uint32_t ptr,
                           value(ptr)));
 }
 
+bool translator_impl::emit_image_access(const Instruction &inst,
+                                        function_builder &fb,
+                                        c::expr_ref &result) {
+  bool is_read = inst.opcode() == spv::Op::OpImageRead;
+  unsigned first = is_read ? 2 : 0;
+  auto image = inst.GetSingleWordOperand(first);
+  auto coord = inst.GetSingleWordOperand(first + 1);
+  auto texel_tyid =
+      is_read ? inst.type_id() : type_id_for(inst.GetSingleWordOperand(2));
+  unsigned operands_index = is_read ? 4 : 3;
+  uint32_t operands = inst.NumOperands() > operands_index
+                          ? inst.GetSingleWordOperand(operands_index)
+                          : 0;
+
+  // OpenCL C takes 4-component texels: float4, half4, or (u)int4, which we
+  // represent as uint4.
+  auto *texel = type_for(texel_tyid)->AsVector();
+  const Type *elem = texel ? texel->element_type() : nullptr;
+  std::string suffix;
+  if (texel && texel->element_count() == 4) {
+    if (elem->kind() == Type::Kind::kFloat) {
+      auto width = elem->AsFloat()->width();
+      suffix = width == 32 ? "f" : width == 16 ? "h" : "";
+    } else if (elem->kind() == Type::Kind::kInteger &&
+               elem->AsInteger()->width() == 32) {
+      suffix = "i";
+    }
+  }
+  if (suffix.empty()) {
+    std::cerr << "UNIMPLEMENTED image texel type " << texel_tyid << std::endl;
+    return false;
+  }
+
+  // Nontemporal is only a hint. Other operands (Lod, offsets, ...) would
+  // change the meaning of the access.
+  operands &= ~SpvImageOperandsNontemporalMask;
+  const uint32_t extend =
+      SpvImageOperandsSignExtendMask | SpvImageOperandsZeroExtendMask;
+  if ((operands & ~extend) || (operands == extend) ||
+      (operands && suffix != "i")) {
+    std::cerr << "UNIMPLEMENTED image operands " << operands << std::endl;
+    return false;
+  }
+
+  // Sampler-less accesses take int, int2 or int4 coordinates; a 3D coordinate
+  // may come with only three components.
+  auto dim = type_for_val(image)->AsImage()->dim();
+  unsigned dims = dim == spv::Dim::Dim1D   ? 1
+                  : dim == spv::Dim::Dim2D ? 2
+                  : dim == spv::Dim::Dim3D ? 3
+                                           : 0;
+  auto *coord_ty = type_for_val(coord);
+  auto *coord_vec = coord_ty->AsVector();
+  auto *coord_elem = coord_vec ? coord_vec->element_type() : coord_ty;
+  unsigned ncoords = coord_vec ? coord_vec->element_count() : 1;
+  if (coord_elem->kind() != Type::Kind::kInteger ||
+      !(ncoords == dims || (dims == 3 && ncoords == 4))) {
+    std::cerr << "UNIMPLEMENTED image coordinate type " << type_id_for(coord_ty)
+              << std::endl;
+    return false;
+  }
+  auto as_int = [](unsigned n, c::expr_ref e) {
+    return c::call(n == 1 ? "as_int" : "as_int" + std::to_string(n),
+                   {std::move(e)});
+  };
+  auto coord_val = as_int(ncoords, value(coord));
+  if (ncoords == 3) {
+    coord_val = c::vector_literal("int4", {coord_val, c::literal("0")});
+  }
+
+  auto access = [&](const std::string &variant) {
+    if (is_read) {
+      auto val = c::call("read_image" + variant, {value(image), coord_val});
+      return variant == "i" ? c::call("as_uint4", {val}) : val;
+    }
+    auto val = value(inst.GetSingleWordOperand(2));
+    if (variant == "i") {
+      val = c::call("as_int4", {val});
+    }
+    return c::call("write_image" + variant, {value(image), coord_val, val});
+  };
+  auto emit = [&](c::expr_ref e) {
+    if (is_read) {
+      result = std::move(e);
+    } else {
+      fb.expression(e);
+    }
+  };
+
+  if (suffix != "i") {
+    emit(access(suffix));
+  } else if (operands & SpvImageOperandsSignExtendMask) {
+    emit(access("i"));
+  } else if (operands & SpvImageOperandsZeroExtendMask) {
+    emit(access("ui"));
+  } else {
+    // SPIR-V integers are signless: unless the producer says otherwise, the
+    // image's channel type decides between sign- and zero-extension, and
+    // OpenCL C has separate builtins for either.
+    auto channel = m_name_allocator.allocate("_channel");
+    fb.declare("int " + channel,
+               c::call("get_image_channel_data_type", {value(image)}));
+    auto is = [&](const char *type) {
+      return c::binary("==", c::name(channel), c::name(type));
+    };
+    auto is_signed = c::binary(
+        "||", c::binary("||", is("CLK_SIGNED_INT8"), is("CLK_SIGNED_INT16")),
+        is("CLK_SIGNED_INT32"));
+    if (is_read) {
+      result = c::ternary(is_signed, access("i"), access("ui"));
+    } else {
+      fb.statement("if (" + c::print(is_signed) + ") " + c::print(access("i")) +
+                   "; else " + c::print(access("ui")));
+    }
+  }
+  return true;
+}
+
 bool translator_impl::translate_instruction(const Instruction &inst,
                                             function_builder &fb) {
   auto opcode = inst.opcode();
@@ -492,6 +610,17 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     // TODO check Lod
     break;
   }
+  case spv::Op::OpImageRead:
+    if (!emit_image_access(inst, fb, val)) {
+      return false;
+    }
+    break;
+  case spv::Op::OpImageWrite:
+    assign_result = false;
+    if (!emit_image_access(inst, fb, val)) {
+      return false;
+    }
+    break;
   case spv::Op::OpImageQuerySizeLod: {
     auto image = inst.GetSingleWordOperand(2);
     // auto lod = inst.GetSingleWordOperand(3); // FIXME validate

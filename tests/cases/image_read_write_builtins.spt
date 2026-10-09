@@ -1,0 +1,52 @@
+; Sampler-less image reads and writes map to read_image*/write_image*, with
+; integer coordinates (a 3D coordinate padded to int4). SPIR-V integers are
+; signless, so an integer texel takes read_imagei/write_imagei with SignExtend,
+; read_imageui/write_imageui with ZeroExtend, and without either the image's
+; channel type decides at run time. The Nontemporal hint is dropped.
+; RUN: %spirv2clc --asm --spirv-version=1.6 %s | %FileCheck %s
+; RUN: %spirv2clc --asm --spirv-version=1.6 %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability ImageBasic
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+      %float = OpTypeFloat 32
+     %v2uint = OpTypeVector %uint 2
+     %v3uint = OpTypeVector %uint 3
+     %v4uint = OpTypeVector %uint 4
+    %v4float = OpTypeVector %float 4
+         %ro = OpTypeImage %void 2D 0 0 0 0 Unknown ReadOnly
+       %ro3d = OpTypeImage %void 3D 0 0 0 0 Unknown ReadOnly
+         %wo = OpTypeImage %void 2D 0 0 0 0 Unknown WriteOnly
+     %uint_0 = OpConstant %uint 0
+         %c2 = OpConstantComposite %v2uint %uint_0 %uint_0
+         %c3 = OpConstantComposite %v3uint %uint_0 %uint_0 %uint_0
+       %fnty = OpTypeFunction %void %ro %ro3d %wo
+          %k = OpFunction %void None %fnty
+          %r = OpFunctionParameter %ro
+        %r3d = OpFunctionParameter %ro3d
+          %w = OpFunctionParameter %wo
+         %bb = OpLabel
+          %f = OpImageRead %v4float %r3d %c3
+               OpImageWrite %w %c2 %f
+         %si = OpImageRead %v4uint %r %c2 SignExtend|Nontemporal
+         %ui = OpImageRead %v4uint %r %c2 ZeroExtend
+          %i = OpImageRead %v4uint %r %c2
+               OpImageWrite %w %c2 %si SignExtend
+               OpImageWrite %w %c2 %ui ZeroExtend
+               OpImageWrite %w %c2 %i
+               OpReturn
+               OpFunctionEnd
+; CHECK:      void kernel k(read_only image2d_t [[R:[^,]+]], read_only image3d_t [[R3D:[^,]+]], write_only image2d_t [[W:[^)]+]])
+; CHECK:      float4 [[F:[^ ]+]] = read_imagef([[R3D]], (int4)(as_int3([[C3:.+]]), 0));
+; CHECK-NEXT: write_imagef([[W]], as_int2([[C2:.+]]), [[F]]);
+; CHECK-NEXT: uint4 [[SI:[^ ]+]] = as_uint4(read_imagei([[R]], as_int2([[C2]])));
+; CHECK-NEXT: uint4 [[UI:[^ ]+]] = read_imageui([[R]], as_int2([[C2]]));
+; CHECK-NEXT: int [[CH:[^ ]+]] = get_image_channel_data_type([[R]]);
+; CHECK-NEXT: uint4 [[I:[^ ]+]] = [[CH]] == CLK_SIGNED_INT8 || [[CH]] == CLK_SIGNED_INT16 || [[CH]] == CLK_SIGNED_INT32 ? as_uint4(read_imagei([[R]], as_int2([[C2]]))) : read_imageui([[R]], as_int2([[C2]]));
+; CHECK-NEXT: write_imagei([[W]], as_int2([[C2]]), as_int4([[SI]]));
+; CHECK-NEXT: write_imageui([[W]], as_int2([[C2]]), [[UI]]);
+; CHECK-NEXT: int [[CH2:[^ ]+]] = get_image_channel_data_type([[W]]);
+; CHECK-NEXT: if ([[CH2]] == CLK_SIGNED_INT8 || [[CH2]] == CLK_SIGNED_INT16 || [[CH2]] == CLK_SIGNED_INT32) write_imagei([[W]], as_int2([[C2]]), as_int4([[I]])); else write_imageui([[W]], as_int2([[C2]]), [[I]]);

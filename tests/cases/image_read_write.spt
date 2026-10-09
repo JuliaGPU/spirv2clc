@@ -1,0 +1,35 @@
+; A kernel that reads and writes the same read_write image (OpenCL C 2.0, an
+; optional feature in 3.0). Producers declare ImageReadWrite for it; below 2.0
+; there is no read_write qualifier, so translation must fail there.
+; RUN: not %spirv2clc --asm --spirv-version=1.4 --cl-std=CL1.2 %s
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL2.0 %s | %FileCheck %s
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL2.0 %s | %clang -c -cl-std=CL2.0 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL3.0 %s | %clang -c -cl-std=CL3.0 -cl-ext=+__opencl_c_images,+__opencl_c_read_write_images -x cl - -o /dev/null
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability ImageBasic
+               OpCapability ImageReadWrite
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+      %float = OpTypeFloat 32
+    %v2uint = OpTypeVector %uint 2
+    %v4float = OpTypeVector %float 4
+        %img = OpTypeImage %void 2D 0 0 0 0 Unknown ReadWrite
+     %uint_0 = OpConstant %uint 0
+    %float_1 = OpConstant %float 1
+      %coord = OpConstantComposite %v2uint %uint_0 %uint_0
+        %one = OpConstantComposite %v4float %float_1 %float_1 %float_1 %float_1
+       %fnty = OpTypeFunction %void %img
+          %k = OpFunction %void None %fnty
+          %i = OpFunctionParameter %img
+         %bb = OpLabel
+          %v = OpImageRead %v4float %i %coord
+          %w = OpFAdd %v4float %v %one
+               OpImageWrite %i %coord %w
+               OpReturn
+               OpFunctionEnd
+; CHECK: void kernel k(read_write image2d_t [[IMG:[^)]+]])
+; CHECK: read_imagef([[IMG]],
+; CHECK: write_imagef([[IMG]],

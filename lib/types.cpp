@@ -428,6 +428,14 @@ bool translator_impl::translate_type(const Instruction &inst) {
       typestr = "write_only";
       break;
     case SpvAccessQualifierReadWrite:
+      // Checked here as well as at the ImageReadWrite capability, since the
+      // ReadWrite qualifier only requires Kernel.
+      if (m_opencl_c_version < 200) {
+        std::cerr << "UNIMPLEMENTED: read_write images require OpenCL C 2.0 "
+                     "(targeting "
+                  << opencl_c_version_str(m_opencl_c_version) << ").\n";
+        return false;
+      }
       typestr = "read_write";
       m_read_write_images = true;
       break;
@@ -447,6 +455,13 @@ bool translator_impl::translate_type(const Instruction &inst) {
       break;
     case SpvDim3D:
       typestr += "image3d_t";
+      // Core in OpenCL C 2.0. Non-aggregate types are unique, so this is
+      // emitted at most once.
+      if (qual == SpvAccessQualifierWriteOnly && m_opencl_c_version < 200) {
+        m_out.extensions
+            << "#pragma OPENCL EXTENSION cl_khr_3d_image_writes : enable"
+            << std::endl;
+      }
       break;
     default:
       std::cerr << "UNIMPLEMENTED image dimensionality " << dim << std::endl;
