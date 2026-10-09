@@ -171,6 +171,11 @@ private:
   bool emit_access_chain(const spvtools::opt::Instruction &inst,
                          bool ptr_variant, c::expr_ref &result) const;
 
+  // A sampler-less image access, OpImageRead (whose value goes in `result`) or
+  // OpImageWrite (emitted into `fb`).
+  bool emit_image_access(const spvtools::opt::Instruction &inst,
+                         function_builder &fb, c::expr_ref &result);
+
   // Component `comp` of vector value `val`.
   c::expr_ref vector_component(uint32_t val, uint32_t comp) const;
 
