@@ -428,6 +428,14 @@ bool translator_impl::translate_type(const Instruction &inst) {
       typestr = "write_only";
       break;
     case SpvAccessQualifierReadWrite:
+      // Checked here as well as at the ImageReadWrite capability, since the
+      // ReadWrite qualifier only requires Kernel.
+      if (m_opencl_c_version < 200) {
+        std::cerr << "UNIMPLEMENTED: read_write images require OpenCL C 2.0 "
+                     "(targeting "
+                  << opencl_c_version_str(m_opencl_c_version) << ").\n";
+        return false;
+      }
       typestr = "read_write";
       m_read_write_images = true;
       break;
