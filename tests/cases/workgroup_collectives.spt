@@ -1,0 +1,122 @@
+; Work-group-only collectives must not enable cl_khr_subgroups.
+; RUN: not %spirv2clc --asm --spirv-version=1.4 --cl-std=CL1.2 %s
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL2.0 %s | %FileCheck %s
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL2.0 %s | %clang -c -cl-std=CL2.0 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL3.0 %s | %clang -c -cl-std=CL3.0 -x cl - -o /dev/null
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Groups
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+               OpName %wg_all "wg_all"
+               OpName %wg_any "wg_any"
+               OpName %wg_broadcast1 "wg_broadcast1"
+               OpName %wg_broadcast2 "wg_broadcast2"
+               OpName %wg_broadcast3 "wg_broadcast3"
+               OpName %wg_IAdd_Reduce "wg_IAdd_Reduce"
+               OpName %wg_IAdd_InclusiveScan "wg_IAdd_InclusiveScan"
+               OpName %wg_IAdd_ExclusiveScan "wg_IAdd_ExclusiveScan"
+               OpName %wg_FAdd_Reduce "wg_FAdd_Reduce"
+               OpName %wg_FAdd_InclusiveScan "wg_FAdd_InclusiveScan"
+               OpName %wg_FAdd_ExclusiveScan "wg_FAdd_ExclusiveScan"
+               OpName %wg_FMin_Reduce "wg_FMin_Reduce"
+               OpName %wg_FMin_InclusiveScan "wg_FMin_InclusiveScan"
+               OpName %wg_FMin_ExclusiveScan "wg_FMin_ExclusiveScan"
+               OpName %wg_UMin_Reduce "wg_UMin_Reduce"
+               OpName %wg_UMin_InclusiveScan "wg_UMin_InclusiveScan"
+               OpName %wg_UMin_ExclusiveScan "wg_UMin_ExclusiveScan"
+               OpName %wg_SMin_Reduce "wg_SMin_Reduce"
+               OpName %wg_SMin_InclusiveScan "wg_SMin_InclusiveScan"
+               OpName %wg_SMin_ExclusiveScan "wg_SMin_ExclusiveScan"
+               OpName %wg_FMax_Reduce "wg_FMax_Reduce"
+               OpName %wg_FMax_InclusiveScan "wg_FMax_InclusiveScan"
+               OpName %wg_FMax_ExclusiveScan "wg_FMax_ExclusiveScan"
+               OpName %wg_UMax_Reduce "wg_UMax_Reduce"
+               OpName %wg_UMax_InclusiveScan "wg_UMax_InclusiveScan"
+               OpName %wg_UMax_ExclusiveScan "wg_UMax_ExclusiveScan"
+               OpName %wg_SMax_Reduce "wg_SMax_Reduce"
+               OpName %wg_SMax_InclusiveScan "wg_SMax_InclusiveScan"
+               OpName %wg_SMax_ExclusiveScan "wg_SMax_ExclusiveScan"
+       %void = OpTypeVoid
+       %bool = OpTypeBool
+       %uint = OpTypeInt 32 0
+        %f32 = OpTypeFloat 32
+         %v2 = OpTypeVector %uint 2
+         %v3 = OpTypeVector %uint 3
+         %v4 = OpTypeVector %uint 4
+        %sg = OpConstant %uint 3
+        %wg = OpConstant %uint 2
+       %val = OpConstant %uint 4294967290
+        %id = OpConstant %uint 0
+   %cluster = OpConstant %uint 4
+      %fval = OpConstant %f32 2.0
+      %true = OpConstantTrue %bool
+     %coord2 = OpConstantComposite %v2 %id %id
+     %coord3 = OpConstantComposite %v3 %id %id %id
+      %mask = OpConstantComposite %v4 %id %id %id %id
+      %fnty = OpTypeFunction %void
+          %k = OpFunction %void None %fnty
+        %lbl = OpLabel
+       %wg_all = OpGroupAll %bool %wg %true
+       %wg_any = OpGroupAny %bool %wg %true
+       %wg_broadcast1 = OpGroupBroadcast %uint %wg %val %id
+       %wg_broadcast2 = OpGroupBroadcast %uint %wg %val %coord2
+       %wg_broadcast3 = OpGroupBroadcast %uint %wg %val %coord3
+       %wg_IAdd_Reduce = OpGroupIAdd %uint %wg Reduce %val
+       %wg_IAdd_InclusiveScan = OpGroupIAdd %uint %wg InclusiveScan %val
+       %wg_IAdd_ExclusiveScan = OpGroupIAdd %uint %wg ExclusiveScan %val
+       %wg_FAdd_Reduce = OpGroupFAdd %f32 %wg Reduce %fval
+       %wg_FAdd_InclusiveScan = OpGroupFAdd %f32 %wg InclusiveScan %fval
+       %wg_FAdd_ExclusiveScan = OpGroupFAdd %f32 %wg ExclusiveScan %fval
+       %wg_FMin_Reduce = OpGroupFMin %f32 %wg Reduce %fval
+       %wg_FMin_InclusiveScan = OpGroupFMin %f32 %wg InclusiveScan %fval
+       %wg_FMin_ExclusiveScan = OpGroupFMin %f32 %wg ExclusiveScan %fval
+       %wg_UMin_Reduce = OpGroupUMin %uint %wg Reduce %val
+       %wg_UMin_InclusiveScan = OpGroupUMin %uint %wg InclusiveScan %val
+       %wg_UMin_ExclusiveScan = OpGroupUMin %uint %wg ExclusiveScan %val
+       %wg_SMin_Reduce = OpGroupSMin %uint %wg Reduce %val
+       %wg_SMin_InclusiveScan = OpGroupSMin %uint %wg InclusiveScan %val
+       %wg_SMin_ExclusiveScan = OpGroupSMin %uint %wg ExclusiveScan %val
+       %wg_FMax_Reduce = OpGroupFMax %f32 %wg Reduce %fval
+       %wg_FMax_InclusiveScan = OpGroupFMax %f32 %wg InclusiveScan %fval
+       %wg_FMax_ExclusiveScan = OpGroupFMax %f32 %wg ExclusiveScan %fval
+       %wg_UMax_Reduce = OpGroupUMax %uint %wg Reduce %val
+       %wg_UMax_InclusiveScan = OpGroupUMax %uint %wg InclusiveScan %val
+       %wg_UMax_ExclusiveScan = OpGroupUMax %uint %wg ExclusiveScan %val
+       %wg_SMax_Reduce = OpGroupSMax %uint %wg Reduce %val
+       %wg_SMax_InclusiveScan = OpGroupSMax %uint %wg InclusiveScan %val
+       %wg_SMax_ExclusiveScan = OpGroupSMax %uint %wg ExclusiveScan %val
+               OpReturn
+               OpFunctionEnd
+
+; CHECK-NOT: cl_khr_subgroups
+; CHECK-DAG: wg_all = work_group_all((int)true) != 0
+; CHECK-DAG: wg_any = work_group_any((int)true) != 0
+; CHECK-DAG: wg_broadcast1 = work_group_broadcast(
+; CHECK-DAG: wg_broadcast2 = work_group_broadcast(
+; CHECK-DAG: wg_broadcast3 = work_group_broadcast(
+; CHECK-DAG: wg_IAdd_Reduce = work_group_reduce_add(
+; CHECK-DAG: wg_IAdd_InclusiveScan = work_group_scan_inclusive_add(
+; CHECK-DAG: wg_IAdd_ExclusiveScan = work_group_scan_exclusive_add(
+; CHECK-DAG: wg_FAdd_Reduce = work_group_reduce_add(
+; CHECK-DAG: wg_FAdd_InclusiveScan = work_group_scan_inclusive_add(
+; CHECK-DAG: wg_FAdd_ExclusiveScan = work_group_scan_exclusive_add(
+; CHECK-DAG: wg_FMin_Reduce = work_group_reduce_min(
+; CHECK-DAG: wg_FMin_InclusiveScan = work_group_scan_inclusive_min(
+; CHECK-DAG: wg_FMin_ExclusiveScan = work_group_scan_exclusive_min(
+; CHECK-DAG: wg_UMin_Reduce = work_group_reduce_min(
+; CHECK-DAG: wg_UMin_InclusiveScan = work_group_scan_inclusive_min(
+; CHECK-DAG: wg_UMin_ExclusiveScan = work_group_scan_exclusive_min(
+; CHECK-DAG: wg_SMin_Reduce = (uint)work_group_reduce_min(as_int(
+; CHECK-DAG: wg_SMin_InclusiveScan = (uint)work_group_scan_inclusive_min(as_int(
+; CHECK-DAG: wg_SMin_ExclusiveScan = (uint)work_group_scan_exclusive_min(as_int(
+; CHECK-DAG: wg_FMax_Reduce = work_group_reduce_max(
+; CHECK-DAG: wg_FMax_InclusiveScan = work_group_scan_inclusive_max(
+; CHECK-DAG: wg_FMax_ExclusiveScan = work_group_scan_exclusive_max(
+; CHECK-DAG: wg_UMax_Reduce = work_group_reduce_max(
+; CHECK-DAG: wg_UMax_InclusiveScan = work_group_scan_inclusive_max(
+; CHECK-DAG: wg_UMax_ExclusiveScan = work_group_scan_exclusive_max(
+; CHECK-DAG: wg_SMax_Reduce = (uint)work_group_reduce_max(as_int(
+; CHECK-DAG: wg_SMax_InclusiveScan = (uint)work_group_scan_inclusive_max(as_int(
+; CHECK-DAG: wg_SMax_ExclusiveScan = (uint)work_group_scan_exclusive_max(as_int(
+; CHECK-NOT: cl_khr_subgroups

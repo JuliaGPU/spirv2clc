@@ -118,21 +118,23 @@ std::string translator_impl::note_unsupported(const std::string &what) const {
   return "UNIMPLEMENTED";
 }
 
+// Unity sources retain their dependency order.
+// clang-format off
 #include "utils.cpp"
 #include "types.cpp"
+#include "groups.cpp"
 #include "instns.cpp"
 #include "instns_ext.cpp"
+// clang-format on
+
+void translator_impl::enable_extension(const char *extension) {
+  if (m_enabled_extensions.insert(extension).second) {
+    m_out.extensions << "#pragma OPENCL EXTENSION " << extension
+                     << " : enable\n";
+  }
+}
 
 bool translator_impl::translate_capabilities() {
-  // Emit each enabling pragma at most once, even when several capabilities map
-  // to the same extension (e.g. the various subgroup capabilities).
-  std::unordered_set<std::string> enabled_extensions;
-  auto enable_extension = [&](const char *ext) {
-    if (enabled_extensions.insert(ext).second) {
-      m_out.extensions << "#pragma OPENCL EXTENSION " << ext << " : enable"
-                       << std::endl;
-    }
-  };
   // cl_khr_subgroups is an OpenCL C 2.0 extension (promoted to the
   // __opencl_c_subgroups optional feature in 3.0). The subgroup capabilities
   // require it; refuse below 2.0 rather than emit an invalid pragma.
@@ -208,14 +210,54 @@ bool translator_impl::translate_capabilities() {
       }
       break;
     case SpvCapabilityGroups:
-    case SpvCapabilityGroupNonUniform:
-    case SpvCapabilityGroupNonUniformShuffle:
-      // Work-group / sub-group collective builtins (shuffle, ...), all available
-      // under cl_khr_subgroups.
-      if (!require_subgroups("subgroups")) {
+      // Groups also covers work-group collectives, which do not need subgroups.
+      if (m_opencl_c_version < 200) {
+        std::cerr << "UNIMPLEMENTED: group operations require OpenCL C 2.0\n";
         return false;
       }
       break;
+    case SpvCapabilityGroupNonUniform:
+      if (!require_subgroups("group operations")) {
+        return false;
+      }
+      break;
+    case SpvCapabilityGroupNonUniformVote:
+    case SpvCapabilityGroupNonUniformArithmetic:
+    case SpvCapabilityGroupNonUniformBallot:
+    case SpvCapabilityGroupNonUniformShuffle:
+    case SpvCapabilityGroupNonUniformShuffleRelative:
+    case SpvCapabilityGroupNonUniformClustered:
+    case SpvCapabilityGroupNonUniformRotateKHR: {
+      if (!require_subgroups("subgroup operations")) {
+        return false;
+      }
+      const char *ext = nullptr;
+      switch (cap) {
+      case SpvCapabilityGroupNonUniformVote:
+        ext = "cl_khr_subgroup_non_uniform_vote";
+        break;
+      case SpvCapabilityGroupNonUniformArithmetic:
+        ext = "cl_khr_subgroup_non_uniform_arithmetic";
+        break;
+      case SpvCapabilityGroupNonUniformBallot:
+        ext = "cl_khr_subgroup_ballot";
+        break;
+      case SpvCapabilityGroupNonUniformShuffle:
+        ext = "cl_khr_subgroup_shuffle";
+        break;
+      case SpvCapabilityGroupNonUniformShuffleRelative:
+        ext = "cl_khr_subgroup_shuffle_relative";
+        break;
+      case SpvCapabilityGroupNonUniformRotateKHR:
+        ext = "cl_khr_subgroup_rotate";
+        break;
+      case SpvCapabilityGroupNonUniformClustered:
+        ext = "cl_khr_subgroup_clustered_reduce";
+        break;
+      }
+      enable_extension(ext);
+      break;
+    }
     case SpvCapabilityAtomicFloat32AddEXT:
     case SpvCapabilityAtomicFloat64AddEXT:
     case SpvCapabilityAtomicFloat32MinMaxEXT:
@@ -237,6 +279,7 @@ bool translator_impl::translate_extensions() const {
   // capabilities/instructions they enable are handled elsewhere).
   static const std::unordered_set<std::string> handled = {
       "SPV_KHR_no_integer_wrap_decoration",
+      "SPV_KHR_subgroup_rotate",
       "SPV_EXT_shader_atomic_float_add",
       "SPV_EXT_shader_atomic_float_min_max",
   };
@@ -422,19 +465,27 @@ bool translator_impl::translate_annotations() {
         case SpvBuiltInWorkDim:
           m_builtin_variables[target] = static_cast<SpvBuiltIn>(builtin);
           break;
+        case SpvBuiltInSubgroupEqMask:
+        case SpvBuiltInSubgroupGeMask:
+        case SpvBuiltInSubgroupGtMask:
+        case SpvBuiltInSubgroupLeMask:
+        case SpvBuiltInSubgroupLtMask:
         case SpvBuiltInSubgroupSize:
         case SpvBuiltInSubgroupMaxSize:
         case SpvBuiltInNumSubgroups:
+        case SpvBuiltInNumEnqueuedSubgroups:
         case SpvBuiltInSubgroupId:
         case SpvBuiltInSubgroupLocalInvocationId:
-          // Mapped to the get_sub_group_*() builtins, which need cl_khr_subgroups
-          // (OpenCL C 2.0+; the pragma is emitted from the subgroup capability).
+          // Mapped to the get_sub_group_*() builtins, which need
+          // cl_khr_subgroups (OpenCL C 2.0+), including when no dispatch
+          // capability is declared.
           if (m_opencl_c_version < 200) {
             std::cerr << "UNIMPLEMENTED: subgroup builtins require OpenCL C 2.0 "
                          "(targeting "
                       << opencl_c_version_str(m_opencl_c_version) << ").\n";
             return false;
           }
+          enable_extension("cl_khr_subgroups");
           m_builtin_variables[target] = static_cast<SpvBuiltIn>(builtin);
           break;
         default:

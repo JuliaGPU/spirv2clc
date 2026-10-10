@@ -1,0 +1,227 @@
+; Non-uniform and clustered arithmetic, bitwise, and logical operations. Check
+; all three reduction/scan modes and clustered argument order.
+; RUN: not %spirv2clc --asm --spirv-version=1.4 --cl-std=CL1.2 %s
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL2.0 %s | %FileCheck %s
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL2.0 %s | %clang -c -cl-std=CL2.0 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL3.0 %s | %clang -c -cl-std=CL3.0 -x cl - -o /dev/null
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability GroupNonUniformArithmetic
+               OpCapability GroupNonUniformClustered
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+               OpName %IAdd_Reduce "IAdd_Reduce"
+               OpName %IAdd_InclusiveScan "IAdd_InclusiveScan"
+               OpName %IAdd_ExclusiveScan "IAdd_ExclusiveScan"
+               OpName %IAdd_ClusteredReduce "IAdd_ClusteredReduce"
+               OpName %FAdd_Reduce "FAdd_Reduce"
+               OpName %FAdd_InclusiveScan "FAdd_InclusiveScan"
+               OpName %FAdd_ExclusiveScan "FAdd_ExclusiveScan"
+               OpName %FAdd_ClusteredReduce "FAdd_ClusteredReduce"
+               OpName %IMul_Reduce "IMul_Reduce"
+               OpName %IMul_InclusiveScan "IMul_InclusiveScan"
+               OpName %IMul_ExclusiveScan "IMul_ExclusiveScan"
+               OpName %IMul_ClusteredReduce "IMul_ClusteredReduce"
+               OpName %FMul_Reduce "FMul_Reduce"
+               OpName %FMul_InclusiveScan "FMul_InclusiveScan"
+               OpName %FMul_ExclusiveScan "FMul_ExclusiveScan"
+               OpName %FMul_ClusteredReduce "FMul_ClusteredReduce"
+               OpName %SMin_Reduce "SMin_Reduce"
+               OpName %SMin_InclusiveScan "SMin_InclusiveScan"
+               OpName %SMin_ExclusiveScan "SMin_ExclusiveScan"
+               OpName %SMin_ClusteredReduce "SMin_ClusteredReduce"
+               OpName %UMin_Reduce "UMin_Reduce"
+               OpName %UMin_InclusiveScan "UMin_InclusiveScan"
+               OpName %UMin_ExclusiveScan "UMin_ExclusiveScan"
+               OpName %UMin_ClusteredReduce "UMin_ClusteredReduce"
+               OpName %FMin_Reduce "FMin_Reduce"
+               OpName %FMin_InclusiveScan "FMin_InclusiveScan"
+               OpName %FMin_ExclusiveScan "FMin_ExclusiveScan"
+               OpName %FMin_ClusteredReduce "FMin_ClusteredReduce"
+               OpName %SMax_Reduce "SMax_Reduce"
+               OpName %SMax_InclusiveScan "SMax_InclusiveScan"
+               OpName %SMax_ExclusiveScan "SMax_ExclusiveScan"
+               OpName %SMax_ClusteredReduce "SMax_ClusteredReduce"
+               OpName %UMax_Reduce "UMax_Reduce"
+               OpName %UMax_InclusiveScan "UMax_InclusiveScan"
+               OpName %UMax_ExclusiveScan "UMax_ExclusiveScan"
+               OpName %UMax_ClusteredReduce "UMax_ClusteredReduce"
+               OpName %FMax_Reduce "FMax_Reduce"
+               OpName %FMax_InclusiveScan "FMax_InclusiveScan"
+               OpName %FMax_ExclusiveScan "FMax_ExclusiveScan"
+               OpName %FMax_ClusteredReduce "FMax_ClusteredReduce"
+               OpName %BitwiseAnd_Reduce "BitwiseAnd_Reduce"
+               OpName %BitwiseAnd_InclusiveScan "BitwiseAnd_InclusiveScan"
+               OpName %BitwiseAnd_ExclusiveScan "BitwiseAnd_ExclusiveScan"
+               OpName %BitwiseAnd_ClusteredReduce "BitwiseAnd_ClusteredReduce"
+               OpName %BitwiseOr_Reduce "BitwiseOr_Reduce"
+               OpName %BitwiseOr_InclusiveScan "BitwiseOr_InclusiveScan"
+               OpName %BitwiseOr_ExclusiveScan "BitwiseOr_ExclusiveScan"
+               OpName %BitwiseOr_ClusteredReduce "BitwiseOr_ClusteredReduce"
+               OpName %BitwiseXor_Reduce "BitwiseXor_Reduce"
+               OpName %BitwiseXor_InclusiveScan "BitwiseXor_InclusiveScan"
+               OpName %BitwiseXor_ExclusiveScan "BitwiseXor_ExclusiveScan"
+               OpName %BitwiseXor_ClusteredReduce "BitwiseXor_ClusteredReduce"
+               OpName %LogicalAnd_Reduce "LogicalAnd_Reduce"
+               OpName %LogicalAnd_InclusiveScan "LogicalAnd_InclusiveScan"
+               OpName %LogicalAnd_ExclusiveScan "LogicalAnd_ExclusiveScan"
+               OpName %LogicalAnd_ClusteredReduce "LogicalAnd_ClusteredReduce"
+               OpName %LogicalOr_Reduce "LogicalOr_Reduce"
+               OpName %LogicalOr_InclusiveScan "LogicalOr_InclusiveScan"
+               OpName %LogicalOr_ExclusiveScan "LogicalOr_ExclusiveScan"
+               OpName %LogicalOr_ClusteredReduce "LogicalOr_ClusteredReduce"
+               OpName %LogicalXor_Reduce "LogicalXor_Reduce"
+               OpName %LogicalXor_InclusiveScan "LogicalXor_InclusiveScan"
+               OpName %LogicalXor_ExclusiveScan "LogicalXor_ExclusiveScan"
+               OpName %LogicalXor_ClusteredReduce "LogicalXor_ClusteredReduce"
+       %void = OpTypeVoid
+       %bool = OpTypeBool
+       %uint = OpTypeInt 32 0
+        %f32 = OpTypeFloat 32
+         %v2 = OpTypeVector %uint 2
+         %v3 = OpTypeVector %uint 3
+         %v4 = OpTypeVector %uint 4
+        %sg = OpConstant %uint 3
+        %wg = OpConstant %uint 2
+       %val = OpConstant %uint 4294967290
+        %id = OpConstant %uint 0
+   %cluster = OpConstant %uint 4
+      %fval = OpConstant %f32 2.0
+      %true = OpConstantTrue %bool
+     %coord2 = OpConstantComposite %v2 %id %id
+     %coord3 = OpConstantComposite %v3 %id %id %id
+      %mask = OpConstantComposite %v4 %id %id %id %id
+      %fnty = OpTypeFunction %void
+          %k = OpFunction %void None %fnty
+        %lbl = OpLabel
+       %IAdd_Reduce = OpGroupNonUniformIAdd %uint %sg Reduce %val
+       %IAdd_InclusiveScan = OpGroupNonUniformIAdd %uint %sg InclusiveScan %val
+       %IAdd_ExclusiveScan = OpGroupNonUniformIAdd %uint %sg ExclusiveScan %val
+       %IAdd_ClusteredReduce = OpGroupNonUniformIAdd %uint %sg ClusteredReduce %val %cluster
+       %FAdd_Reduce = OpGroupNonUniformFAdd %f32 %sg Reduce %fval
+       %FAdd_InclusiveScan = OpGroupNonUniformFAdd %f32 %sg InclusiveScan %fval
+       %FAdd_ExclusiveScan = OpGroupNonUniformFAdd %f32 %sg ExclusiveScan %fval
+       %FAdd_ClusteredReduce = OpGroupNonUniformFAdd %f32 %sg ClusteredReduce %fval %cluster
+       %IMul_Reduce = OpGroupNonUniformIMul %uint %sg Reduce %val
+       %IMul_InclusiveScan = OpGroupNonUniformIMul %uint %sg InclusiveScan %val
+       %IMul_ExclusiveScan = OpGroupNonUniformIMul %uint %sg ExclusiveScan %val
+       %IMul_ClusteredReduce = OpGroupNonUniformIMul %uint %sg ClusteredReduce %val %cluster
+       %FMul_Reduce = OpGroupNonUniformFMul %f32 %sg Reduce %fval
+       %FMul_InclusiveScan = OpGroupNonUniformFMul %f32 %sg InclusiveScan %fval
+       %FMul_ExclusiveScan = OpGroupNonUniformFMul %f32 %sg ExclusiveScan %fval
+       %FMul_ClusteredReduce = OpGroupNonUniformFMul %f32 %sg ClusteredReduce %fval %cluster
+       %SMin_Reduce = OpGroupNonUniformSMin %uint %sg Reduce %val
+       %SMin_InclusiveScan = OpGroupNonUniformSMin %uint %sg InclusiveScan %val
+       %SMin_ExclusiveScan = OpGroupNonUniformSMin %uint %sg ExclusiveScan %val
+       %SMin_ClusteredReduce = OpGroupNonUniformSMin %uint %sg ClusteredReduce %val %cluster
+       %UMin_Reduce = OpGroupNonUniformUMin %uint %sg Reduce %val
+       %UMin_InclusiveScan = OpGroupNonUniformUMin %uint %sg InclusiveScan %val
+       %UMin_ExclusiveScan = OpGroupNonUniformUMin %uint %sg ExclusiveScan %val
+       %UMin_ClusteredReduce = OpGroupNonUniformUMin %uint %sg ClusteredReduce %val %cluster
+       %FMin_Reduce = OpGroupNonUniformFMin %f32 %sg Reduce %fval
+       %FMin_InclusiveScan = OpGroupNonUniformFMin %f32 %sg InclusiveScan %fval
+       %FMin_ExclusiveScan = OpGroupNonUniformFMin %f32 %sg ExclusiveScan %fval
+       %FMin_ClusteredReduce = OpGroupNonUniformFMin %f32 %sg ClusteredReduce %fval %cluster
+       %SMax_Reduce = OpGroupNonUniformSMax %uint %sg Reduce %val
+       %SMax_InclusiveScan = OpGroupNonUniformSMax %uint %sg InclusiveScan %val
+       %SMax_ExclusiveScan = OpGroupNonUniformSMax %uint %sg ExclusiveScan %val
+       %SMax_ClusteredReduce = OpGroupNonUniformSMax %uint %sg ClusteredReduce %val %cluster
+       %UMax_Reduce = OpGroupNonUniformUMax %uint %sg Reduce %val
+       %UMax_InclusiveScan = OpGroupNonUniformUMax %uint %sg InclusiveScan %val
+       %UMax_ExclusiveScan = OpGroupNonUniformUMax %uint %sg ExclusiveScan %val
+       %UMax_ClusteredReduce = OpGroupNonUniformUMax %uint %sg ClusteredReduce %val %cluster
+       %FMax_Reduce = OpGroupNonUniformFMax %f32 %sg Reduce %fval
+       %FMax_InclusiveScan = OpGroupNonUniformFMax %f32 %sg InclusiveScan %fval
+       %FMax_ExclusiveScan = OpGroupNonUniformFMax %f32 %sg ExclusiveScan %fval
+       %FMax_ClusteredReduce = OpGroupNonUniformFMax %f32 %sg ClusteredReduce %fval %cluster
+       %BitwiseAnd_Reduce = OpGroupNonUniformBitwiseAnd %uint %sg Reduce %val
+       %BitwiseAnd_InclusiveScan = OpGroupNonUniformBitwiseAnd %uint %sg InclusiveScan %val
+       %BitwiseAnd_ExclusiveScan = OpGroupNonUniformBitwiseAnd %uint %sg ExclusiveScan %val
+       %BitwiseAnd_ClusteredReduce = OpGroupNonUniformBitwiseAnd %uint %sg ClusteredReduce %val %cluster
+       %BitwiseOr_Reduce = OpGroupNonUniformBitwiseOr %uint %sg Reduce %val
+       %BitwiseOr_InclusiveScan = OpGroupNonUniformBitwiseOr %uint %sg InclusiveScan %val
+       %BitwiseOr_ExclusiveScan = OpGroupNonUniformBitwiseOr %uint %sg ExclusiveScan %val
+       %BitwiseOr_ClusteredReduce = OpGroupNonUniformBitwiseOr %uint %sg ClusteredReduce %val %cluster
+       %BitwiseXor_Reduce = OpGroupNonUniformBitwiseXor %uint %sg Reduce %val
+       %BitwiseXor_InclusiveScan = OpGroupNonUniformBitwiseXor %uint %sg InclusiveScan %val
+       %BitwiseXor_ExclusiveScan = OpGroupNonUniformBitwiseXor %uint %sg ExclusiveScan %val
+       %BitwiseXor_ClusteredReduce = OpGroupNonUniformBitwiseXor %uint %sg ClusteredReduce %val %cluster
+       %LogicalAnd_Reduce = OpGroupNonUniformLogicalAnd %bool %sg Reduce %true
+       %LogicalAnd_InclusiveScan = OpGroupNonUniformLogicalAnd %bool %sg InclusiveScan %true
+       %LogicalAnd_ExclusiveScan = OpGroupNonUniformLogicalAnd %bool %sg ExclusiveScan %true
+       %LogicalAnd_ClusteredReduce = OpGroupNonUniformLogicalAnd %bool %sg ClusteredReduce %true %cluster
+       %LogicalOr_Reduce = OpGroupNonUniformLogicalOr %bool %sg Reduce %true
+       %LogicalOr_InclusiveScan = OpGroupNonUniformLogicalOr %bool %sg InclusiveScan %true
+       %LogicalOr_ExclusiveScan = OpGroupNonUniformLogicalOr %bool %sg ExclusiveScan %true
+       %LogicalOr_ClusteredReduce = OpGroupNonUniformLogicalOr %bool %sg ClusteredReduce %true %cluster
+       %LogicalXor_Reduce = OpGroupNonUniformLogicalXor %bool %sg Reduce %true
+       %LogicalXor_InclusiveScan = OpGroupNonUniformLogicalXor %bool %sg InclusiveScan %true
+       %LogicalXor_ExclusiveScan = OpGroupNonUniformLogicalXor %bool %sg ExclusiveScan %true
+       %LogicalXor_ClusteredReduce = OpGroupNonUniformLogicalXor %bool %sg ClusteredReduce %true %cluster
+               OpReturn
+               OpFunctionEnd
+
+; CHECK-DAG: IAdd_Reduce = sub_group_non_uniform_reduce_add(
+; CHECK-DAG: IAdd_InclusiveScan = sub_group_non_uniform_scan_inclusive_add(
+; CHECK-DAG: IAdd_ExclusiveScan = sub_group_non_uniform_scan_exclusive_add(
+; CHECK-DAG: IAdd_ClusteredReduce = sub_group_clustered_reduce_add(
+; CHECK-DAG: FAdd_Reduce = sub_group_non_uniform_reduce_add(
+; CHECK-DAG: FAdd_InclusiveScan = sub_group_non_uniform_scan_inclusive_add(
+; CHECK-DAG: FAdd_ExclusiveScan = sub_group_non_uniform_scan_exclusive_add(
+; CHECK-DAG: FAdd_ClusteredReduce = sub_group_clustered_reduce_add(
+; CHECK-DAG: IMul_Reduce = sub_group_non_uniform_reduce_mul(
+; CHECK-DAG: IMul_InclusiveScan = sub_group_non_uniform_scan_inclusive_mul(
+; CHECK-DAG: IMul_ExclusiveScan = sub_group_non_uniform_scan_exclusive_mul(
+; CHECK-DAG: IMul_ClusteredReduce = sub_group_clustered_reduce_mul(
+; CHECK-DAG: FMul_Reduce = sub_group_non_uniform_reduce_mul(
+; CHECK-DAG: FMul_InclusiveScan = sub_group_non_uniform_scan_inclusive_mul(
+; CHECK-DAG: FMul_ExclusiveScan = sub_group_non_uniform_scan_exclusive_mul(
+; CHECK-DAG: FMul_ClusteredReduce = sub_group_clustered_reduce_mul(
+; CHECK-DAG: SMin_Reduce = (uint)sub_group_non_uniform_reduce_min(as_int(
+; CHECK-DAG: SMin_InclusiveScan = (uint)sub_group_non_uniform_scan_inclusive_min(as_int(
+; CHECK-DAG: SMin_ExclusiveScan = (uint)sub_group_non_uniform_scan_exclusive_min(as_int(
+; CHECK-DAG: SMin_ClusteredReduce = (uint)sub_group_clustered_reduce_min(as_int(
+; CHECK-DAG: UMin_Reduce = sub_group_non_uniform_reduce_min(
+; CHECK-DAG: UMin_InclusiveScan = sub_group_non_uniform_scan_inclusive_min(
+; CHECK-DAG: UMin_ExclusiveScan = sub_group_non_uniform_scan_exclusive_min(
+; CHECK-DAG: UMin_ClusteredReduce = sub_group_clustered_reduce_min(
+; CHECK-DAG: FMin_Reduce = sub_group_non_uniform_reduce_min(
+; CHECK-DAG: FMin_InclusiveScan = sub_group_non_uniform_scan_inclusive_min(
+; CHECK-DAG: FMin_ExclusiveScan = sub_group_non_uniform_scan_exclusive_min(
+; CHECK-DAG: FMin_ClusteredReduce = sub_group_clustered_reduce_min(
+; CHECK-DAG: SMax_Reduce = (uint)sub_group_non_uniform_reduce_max(as_int(
+; CHECK-DAG: SMax_InclusiveScan = (uint)sub_group_non_uniform_scan_inclusive_max(as_int(
+; CHECK-DAG: SMax_ExclusiveScan = (uint)sub_group_non_uniform_scan_exclusive_max(as_int(
+; CHECK-DAG: SMax_ClusteredReduce = (uint)sub_group_clustered_reduce_max(as_int(
+; CHECK-DAG: UMax_Reduce = sub_group_non_uniform_reduce_max(
+; CHECK-DAG: UMax_InclusiveScan = sub_group_non_uniform_scan_inclusive_max(
+; CHECK-DAG: UMax_ExclusiveScan = sub_group_non_uniform_scan_exclusive_max(
+; CHECK-DAG: UMax_ClusteredReduce = sub_group_clustered_reduce_max(
+; CHECK-DAG: FMax_Reduce = sub_group_non_uniform_reduce_max(
+; CHECK-DAG: FMax_InclusiveScan = sub_group_non_uniform_scan_inclusive_max(
+; CHECK-DAG: FMax_ExclusiveScan = sub_group_non_uniform_scan_exclusive_max(
+; CHECK-DAG: FMax_ClusteredReduce = sub_group_clustered_reduce_max(
+; CHECK-DAG: BitwiseAnd_Reduce = sub_group_non_uniform_reduce_and(
+; CHECK-DAG: BitwiseAnd_InclusiveScan = sub_group_non_uniform_scan_inclusive_and(
+; CHECK-DAG: BitwiseAnd_ExclusiveScan = sub_group_non_uniform_scan_exclusive_and(
+; CHECK-DAG: BitwiseAnd_ClusteredReduce = sub_group_clustered_reduce_and(
+; CHECK-DAG: BitwiseOr_Reduce = sub_group_non_uniform_reduce_or(
+; CHECK-DAG: BitwiseOr_InclusiveScan = sub_group_non_uniform_scan_inclusive_or(
+; CHECK-DAG: BitwiseOr_ExclusiveScan = sub_group_non_uniform_scan_exclusive_or(
+; CHECK-DAG: BitwiseOr_ClusteredReduce = sub_group_clustered_reduce_or(
+; CHECK-DAG: BitwiseXor_Reduce = sub_group_non_uniform_reduce_xor(
+; CHECK-DAG: BitwiseXor_InclusiveScan = sub_group_non_uniform_scan_inclusive_xor(
+; CHECK-DAG: BitwiseXor_ExclusiveScan = sub_group_non_uniform_scan_exclusive_xor(
+; CHECK-DAG: BitwiseXor_ClusteredReduce = sub_group_clustered_reduce_xor(
+; CHECK-DAG: LogicalAnd_Reduce = sub_group_non_uniform_reduce_logical_and({{.*}} != 0
+; CHECK-DAG: LogicalAnd_InclusiveScan = sub_group_non_uniform_scan_inclusive_logical_and({{.*}} != 0
+; CHECK-DAG: LogicalAnd_ExclusiveScan = sub_group_non_uniform_scan_exclusive_logical_and({{.*}} != 0
+; CHECK-DAG: LogicalAnd_ClusteredReduce = sub_group_clustered_reduce_logical_and({{.*}} != 0
+; CHECK-DAG: LogicalOr_Reduce = sub_group_non_uniform_reduce_logical_or({{.*}} != 0
+; CHECK-DAG: LogicalOr_InclusiveScan = sub_group_non_uniform_scan_inclusive_logical_or({{.*}} != 0
+; CHECK-DAG: LogicalOr_ExclusiveScan = sub_group_non_uniform_scan_exclusive_logical_or({{.*}} != 0
+; CHECK-DAG: LogicalOr_ClusteredReduce = sub_group_clustered_reduce_logical_or({{.*}} != 0
+; CHECK-DAG: LogicalXor_Reduce = sub_group_non_uniform_reduce_logical_xor({{.*}} != 0
+; CHECK-DAG: LogicalXor_InclusiveScan = sub_group_non_uniform_scan_inclusive_logical_xor({{.*}} != 0
+; CHECK-DAG: LogicalXor_ExclusiveScan = sub_group_non_uniform_scan_exclusive_logical_xor({{.*}} != 0
+; CHECK-DAG: LogicalXor_ClusteredReduce = sub_group_clustered_reduce_logical_xor({{.*}} != 0

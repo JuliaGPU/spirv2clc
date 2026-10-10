@@ -1,0 +1,65 @@
+; All ballot operations map to cl_khr_subgroup_ballot, including the distinct
+; names used for ballot scans.
+; RUN: not %spirv2clc --asm --spirv-version=1.4 --cl-std=CL1.2 %s
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL2.0 %s | %FileCheck %s
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL2.0 %s | %clang -c -cl-std=CL2.0 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL3.0 %s | %clang -c -cl-std=CL3.0 -x cl - -o /dev/null
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability GroupNonUniformBallot
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+               OpName %Broadcast "Broadcast"
+               OpName %BroadcastFirst "BroadcastFirst"
+               OpName %Ballot "Ballot"
+               OpName %InverseBallot "InverseBallot"
+               OpName %BallotBitExtract "BallotBitExtract"
+               OpName %BallotFindLSB "BallotFindLSB"
+               OpName %BallotFindMSB "BallotFindMSB"
+               OpName %Reduce "Reduce"
+               OpName %InclusiveScan "InclusiveScan"
+               OpName %ExclusiveScan "ExclusiveScan"
+       %void = OpTypeVoid
+       %bool = OpTypeBool
+       %uint = OpTypeInt 32 0
+        %f32 = OpTypeFloat 32
+         %v2 = OpTypeVector %uint 2
+         %v3 = OpTypeVector %uint 3
+         %v4 = OpTypeVector %uint 4
+        %sg = OpConstant %uint 3
+        %wg = OpConstant %uint 2
+       %val = OpConstant %uint 4294967290
+        %id = OpConstant %uint 0
+   %cluster = OpConstant %uint 4
+      %fval = OpConstant %f32 2.0
+      %true = OpConstantTrue %bool
+     %coord2 = OpConstantComposite %v2 %id %id
+     %coord3 = OpConstantComposite %v3 %id %id %id
+      %mask = OpConstantComposite %v4 %id %id %id %id
+      %fnty = OpTypeFunction %void
+          %k = OpFunction %void None %fnty
+        %lbl = OpLabel
+       %Broadcast = OpGroupNonUniformBroadcast %uint %sg %val %id
+       %BroadcastFirst = OpGroupNonUniformBroadcastFirst %uint %sg %val
+       %Ballot = OpGroupNonUniformBallot %v4 %sg %true
+       %InverseBallot = OpGroupNonUniformInverseBallot %bool %sg %mask
+       %BallotBitExtract = OpGroupNonUniformBallotBitExtract %bool %sg %mask %id
+       %BallotFindLSB = OpGroupNonUniformBallotFindLSB %uint %sg %mask
+       %BallotFindMSB = OpGroupNonUniformBallotFindMSB %uint %sg %mask
+       %Reduce = OpGroupNonUniformBallotBitCount %uint %sg Reduce %mask
+       %InclusiveScan = OpGroupNonUniformBallotBitCount %uint %sg InclusiveScan %mask
+       %ExclusiveScan = OpGroupNonUniformBallotBitCount %uint %sg ExclusiveScan %mask
+               OpReturn
+               OpFunctionEnd
+
+; CHECK-DAG: #pragma OPENCL EXTENSION cl_khr_subgroup_ballot : enable
+; CHECK-DAG: Broadcast = sub_group_non_uniform_broadcast(
+; CHECK-DAG: BroadcastFirst = sub_group_broadcast_first(
+; CHECK-DAG: Ballot = sub_group_ballot(
+; CHECK-DAG: InverseBallot = sub_group_inverse_ballot(
+; CHECK-DAG: BallotBitExtract = sub_group_ballot_bit_extract(
+; CHECK-DAG: BallotFindLSB = sub_group_ballot_find_lsb(
+; CHECK-DAG: BallotFindMSB = sub_group_ballot_find_msb(
+; CHECK-DAG: Reduce = sub_group_ballot_bit_count(
+; CHECK-DAG: InclusiveScan = sub_group_ballot_inclusive_scan(
+; CHECK-DAG: ExclusiveScan = sub_group_ballot_exclusive_scan(

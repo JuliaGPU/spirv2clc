@@ -1,0 +1,70 @@
+; Sub-group collectives accept narrow integers with extended_types, 64-bit
+; integers, half/double values, and vector broadcasts.
+; RUN: not %spirv2clc --asm --spirv-version=1.4 --cl-std=CL1.2 %s
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL2.0 %s | %FileCheck %s
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL2.0 %s | %clang -c -cl-std=CL2.0 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL3.0 %s | %clang -c -cl-std=CL3.0 -x cl - -o /dev/null
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Groups
+               OpCapability Int8
+               OpCapability Int16
+               OpCapability Int64
+               OpCapability Float16
+               OpCapability Float64
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+       %void = OpTypeVoid
+       %u8 = OpTypeInt 8 0
+      %u16 = OpTypeInt 16 0
+      %u64 = OpTypeInt 64 0
+      %f16 = OpTypeFloat 16
+      %f64 = OpTypeFloat 64
+      %c8 = OpConstant %u8 250
+     %c16 = OpConstant %u16 65530
+     %c64 = OpConstant %u64 18446744073709551610
+     %chalf = OpConstant %f16 2.0
+     %cdouble = OpConstant %f64 2.0
+       %bool = OpTypeBool
+       %uint = OpTypeInt 32 0
+        %f32 = OpTypeFloat 32
+         %v2 = OpTypeVector %uint 2
+         %v3 = OpTypeVector %uint 3
+         %v4 = OpTypeVector %uint 4
+        %sg = OpConstant %uint 3
+        %wg = OpConstant %uint 2
+       %val = OpConstant %uint 4294967290
+        %id = OpConstant %uint 0
+   %cluster = OpConstant %uint 4
+      %fval = OpConstant %f32 2.0
+      %true = OpConstantTrue %bool
+     %coord2 = OpConstantComposite %v2 %id %id
+     %coord3 = OpConstantComposite %v3 %id %id %id
+      %mask = OpConstantComposite %v4 %id %id %id %id
+      %fnty = OpTypeFunction %void
+          %k = OpFunction %void None %fnty
+        %lbl = OpLabel
+        %u8_broadcast = OpGroupBroadcast %u8 %sg %c8 %id
+        %u8_reduce = OpGroupIAdd %u8 %sg Reduce %c8
+        %u8_min = OpGroupSMin %u8 %sg ExclusiveScan %c8
+        %u16_broadcast = OpGroupBroadcast %u16 %sg %c16 %id
+        %u16_reduce = OpGroupIAdd %u16 %sg Reduce %c16
+        %u16_min = OpGroupSMin %u16 %sg ExclusiveScan %c16
+        %u64_broadcast = OpGroupBroadcast %u64 %sg %c64 %id
+        %u64_reduce = OpGroupIAdd %u64 %sg Reduce %c64
+        %u64_min = OpGroupSMin %u64 %sg ExclusiveScan %c64
+        %f16_broadcast = OpGroupBroadcast %f16 %sg %chalf %id
+        %f16_reduce = OpGroupFAdd %f16 %sg Reduce %chalf
+        %f16_min = OpGroupFMin %f16 %sg ExclusiveScan %chalf
+        %f64_broadcast = OpGroupBroadcast %f64 %sg %cdouble %id
+        %f64_reduce = OpGroupFAdd %f64 %sg Reduce %cdouble
+        %f64_min = OpGroupFMin %f64 %sg ExclusiveScan %cdouble
+        %vector = OpGroupBroadcast %v4 %sg %mask %id
+               OpReturn
+               OpFunctionEnd
+
+; CHECK-DAG: #pragma OPENCL EXTENSION cl_khr_subgroup_extended_types : enable
+; CHECK-DAG: sub_group_scan_exclusive_min(as_char(
+; CHECK-DAG: sub_group_scan_exclusive_min(as_short(
+; CHECK-DAG: sub_group_scan_exclusive_min(as_long(
+; CHECK-DAG: sub_group_broadcast((uint4)

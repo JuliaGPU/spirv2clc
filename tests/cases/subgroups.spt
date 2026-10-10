@@ -1,7 +1,4 @@
-; The Groups capability (sub-group / work-group collectives) maps to the
-; cl_khr_subgroups extension, which is available from OpenCL C 2.0 on:
-; translation must fail below that, and otherwise enable it via pragma like the
-; fp16/fp64 extensions.
+; A subgroup Groups instruction enables cl_khr_subgroups on OpenCL C 2.0+.
 ; RUN: not %spirv2clc --asm --spirv-version=1.4 --cl-std=CL1.2 %s
 ; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL3.0 %s | %FileCheck %s
                OpCapability Kernel
@@ -10,9 +7,14 @@
                OpMemoryModel Physical64 OpenCL
                OpEntryPoint Kernel %main "test"
        %void = OpTypeVoid
+       %bool = OpTypeBool
+       %uint = OpTypeInt 32 0
+      %scope = OpConstant %uint 3
+       %true = OpConstantTrue %bool
      %mainty = OpTypeFunction %void
        %main = OpFunction %void None %mainty
         %mbb = OpLabel
+        %any = OpGroupAny %bool %scope %true
                OpReturn
                OpFunctionEnd
 ; CHECK: #pragma OPENCL EXTENSION cl_khr_subgroups : enable

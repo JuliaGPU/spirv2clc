@@ -1,0 +1,44 @@
+; Boolean data movement and AllEqual use int overloads and normalize the
+; results back to booleans.
+; RUN: not %spirv2clc --asm --spirv-version=1.4 --cl-std=CL1.2 %s
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL2.0 %s | %FileCheck %s
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL2.0 %s | %clang -c -cl-std=CL2.0 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL3.0 %s | %clang -c -cl-std=CL3.0 -x cl - -o /dev/null
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability GroupNonUniformBallot
+               OpCapability GroupNonUniformVote
+               OpCapability GroupNonUniformShuffle
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+       %void = OpTypeVoid
+       %bool = OpTypeBool
+       %uint = OpTypeInt 32 0
+        %f32 = OpTypeFloat 32
+         %v2 = OpTypeVector %uint 2
+         %v3 = OpTypeVector %uint 3
+         %v4 = OpTypeVector %uint 4
+        %sg = OpConstant %uint 3
+        %wg = OpConstant %uint 2
+       %val = OpConstant %uint 4294967290
+        %id = OpConstant %uint 0
+   %cluster = OpConstant %uint 4
+      %fval = OpConstant %f32 2.0
+      %true = OpConstantTrue %bool
+     %coord2 = OpConstantComposite %v2 %id %id
+     %coord3 = OpConstantComposite %v3 %id %id %id
+      %mask = OpConstantComposite %v4 %id %id %id %id
+      %fnty = OpTypeFunction %void
+          %k = OpFunction %void None %fnty
+        %lbl = OpLabel
+     %bool_bcast = OpGroupNonUniformBroadcast %bool %sg %true %id
+     %bool_first = OpGroupNonUniformBroadcastFirst %bool %sg %true
+     %bool_shuffle = OpGroupNonUniformShuffle %bool %sg %true %id
+     %bool_equal = OpGroupNonUniformAllEqual %bool %sg %true
+               OpReturn
+               OpFunctionEnd
+
+; CHECK: sub_group_non_uniform_broadcast((int)true, {{.*}}) != 0
+; CHECK: sub_group_broadcast_first((int)true) != 0
+; CHECK: sub_group_shuffle((int)true, {{.*}}) != 0
+; CHECK: sub_group_non_uniform_all_equal((int)true) != 0

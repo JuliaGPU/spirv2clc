@@ -8,24 +8,29 @@
                OpCapability Addresses
                OpCapability SubgroupDispatch
                OpMemoryModel Physical64 OpenCL
-               OpEntryPoint Kernel %k "test" %sgid %nsg
+               OpEntryPoint Kernel %k "test" %sgid %nsg %enqueued
                OpDecorate %sgid BuiltIn SubgroupId
                OpDecorate %nsg BuiltIn NumSubgroups
+               OpDecorate %enqueued BuiltIn NumEnqueuedSubgroups
        %void = OpTypeVoid
        %uint = OpTypeInt 32 0
   %p_in_uint = OpTypePointer Input %uint
    %p_g_uint = OpTypePointer CrossWorkgroup %uint
        %sgid = OpVariable %p_in_uint Input
-        %nsg = OpVariable %p_in_uint Input
+   %enqueued = OpVariable %p_in_uint Input
+       %nsg = OpVariable %p_in_uint Input
        %fnty = OpTypeFunction %void %p_g_uint
           %k = OpFunction %void None %fnty
         %out = OpFunctionParameter %p_g_uint
         %lbl = OpLabel
           %a = OpLoad %uint %sgid
           %b = OpLoad %uint %nsg
+          %e = OpLoad %uint %enqueued
           %s = OpIAdd %uint %a %b
-               OpStore %out %s
+         %s2 = OpIAdd %uint %s %e
+               OpStore %out %s2
                OpReturn
                OpFunctionEnd
 ; CHECK-DAG: get_sub_group_id()
 ; CHECK-DAG: get_num_sub_groups()
+; CHECK-DAG: get_enqueued_num_sub_groups()
