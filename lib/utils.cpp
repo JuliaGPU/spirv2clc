@@ -503,10 +503,35 @@ std::optional<std::string> translator_impl::get_string_literal(
 }
 
 std::optional<std::string>
-translator_impl::string_literal_for(uint32_t var_id) const {
-  auto it = m_constant_string_literals.find(var_id);
-  if (it != m_constant_string_literals.end()) {
-    return it->second;
+translator_impl::string_literal_for(uint32_t ptr_id) const {
+  // Front-ends often cast the string variable before using it (e.g. to a
+  // `uchar*` for printf), so look through casts and zero-offset access chains.
+  auto defuse = m_ir->get_def_use_mgr();
+  auto cstmgr = m_ir->get_constant_mgr();
+  while (true) {
+    auto it = m_constant_string_literals.find(ptr_id);
+    if (it != m_constant_string_literals.end()) {
+      return it->second;
+    }
+
+    auto def = defuse->GetDef(ptr_id);
+    switch (def->opcode()) {
+    case spv::Op::OpBitcast:
+      break;
+    case spv::Op::OpAccessChain:
+    case spv::Op::OpInBoundsAccessChain:
+    case spv::Op::OpPtrAccessChain:
+    case spv::Op::OpInBoundsPtrAccessChain:
+      for (uint32_t i = 1; i < def->NumInOperands(); i++) {
+        auto cst = cstmgr->FindDeclaredConstant(def->GetSingleWordInOperand(i));
+        if (cst == nullptr || !cst->IsZero()) {
+          return std::nullopt;
+        }
+      }
+      break;
+    default:
+      return std::nullopt;
+    }
+    ptr_id = def->GetSingleWordInOperand(0);
   }
-  return std::nullopt;
 }

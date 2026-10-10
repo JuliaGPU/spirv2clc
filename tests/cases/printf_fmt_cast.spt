@@ -1,0 +1,44 @@
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL2.0 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+; SPIR-V
+; Version: 1.2
+; Generator: Khronos SPIR-V Tools Assembler; 0
+; Bound: 26
+; Schema: 0
+; The format string reaches printf through a pointer cast (LLVM's SPIR-V back-end
+; casts it to `uchar*`) or a zero-index access chain (typed-pointer llvm-spirv).
+; It must still be emitted as a string literal, which NVIDIA requires.
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Int8
+               OpCapability Int64
+               OpCapability Linkage
+          %1 = OpExtInstImport "OpenCL.std"
+               OpMemoryModel Physical64 OpenCL
+          %2 = OpTypeVoid
+          %3 = OpTypeInt 32 0
+          %4 = OpTypeInt 8 0
+          %5 = OpTypeInt 64 0
+          %6 = OpConstant %3 4
+          %7 = OpTypeArray %4 %6
+          %8 = OpTypePointer UniformConstant %7
+          %9 = OpTypePointer UniformConstant %4
+         %10 = OpTypeFunction %2
+         %11 = OpConstant %4 37
+         %12 = OpConstant %4 100
+         %13 = OpConstant %4 10
+         %14 = OpConstant %4 0
+         %15 = OpConstantComposite %7 %11 %12 %13 %14
+         %16 = OpVariable %8 UniformConstant %15
+         %17 = OpConstant %5 0
+         %18 = OpConstant %3 42
+         %20 = OpFunction %2 None %10
+         %21 = OpLabel
+         %22 = OpBitcast %9 %16
+         %23 = OpExtInst %3 %1 printf %22 %18
+; CHECK: printf("%d\n", (uint)42);
+         %24 = OpInBoundsPtrAccessChain %9 %16 %17 %17
+         %25 = OpExtInst %3 %1 printf %24 %18
+; CHECK: printf("%d\n", (uint)42);
+               OpReturn
+               OpFunctionEnd
