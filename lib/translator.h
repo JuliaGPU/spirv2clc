@@ -382,7 +382,8 @@ private:
 
   std::optional<std::string>
   get_string_literal(const spvtools::opt::Instruction &inst) const;
-  std::optional<std::string> string_literal_for(uint32_t var_id) const;
+  // The string literal `ptr_id` points to the start of, if any.
+  std::optional<std::string> string_literal_for(uint32_t ptr_id) const;
 
   c::expr_ref null_constant(uint32_t tyid) const;
   c::expr_ref

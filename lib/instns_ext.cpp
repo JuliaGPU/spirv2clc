@@ -298,7 +298,7 @@ bool translator_impl::translate_extended_instruction(const Instruction &inst,
       auto format = operand(4);
       c::expr_ref format_arg;
 
-      // Check if we have cached string data for this variable
+      // NVIDIA requires the format to be a string literal.
       auto string_literal = string_literal_for(format);
       if (string_literal) {
         format_arg = c::literal(*string_literal);
