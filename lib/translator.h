@@ -293,6 +293,14 @@ private:
   // reporting) for one OpenCL C has no counterpart for.
   c::expr_ref memory_scope(uint32_t scope) const;
 
+  // Translate OpenCL group builtins, preserving scope, operation and
+  // signedness.
+  // No value means this is not a group instruction.
+  std::optional<bool>
+  translate_group_instruction(const spvtools::opt::Instruction &inst,
+                              c::expr_ref &result);
+  void enable_extension(const char *extension);
+
   // The CLK_*_MEM_FENCE flags for a SPIR-V memory-semantics mask (0 if no
   // memory class is set). Shared by the barrier and fence instructions.
   c::expr_ref fence_flags(uint32_t mem_sem) const;
@@ -427,6 +435,7 @@ private:
     m_translation_failed = false;
     m_read_write_images = false;
     m_out = output();
+    m_enabled_extensions.clear();
     m_name_allocator = name_allocator();
     m_debug_names.clear();
     m_names.clear();
@@ -465,6 +474,7 @@ private:
 
   std::unique_ptr<spvtools::opt::IRContext> m_ir;
   output m_out;
+  std::unordered_set<std::string> m_enabled_extensions;
   name_allocator m_name_allocator;
   // OpName strings, as given.
   std::unordered_map<uint32_t, std::string> m_debug_names;

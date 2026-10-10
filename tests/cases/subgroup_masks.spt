@@ -1,0 +1,84 @@
+; Ballot masks are complete uint4 queries. Exercise named loads, whole-value
+; stores, constant extraction, and dynamic extraction.
+; RUN: not %spirv2clc --asm --spirv-version=1.4 --cl-std=CL1.2 %s
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL2.0 %s | %FileCheck %s
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL2.0 %s | %clang -c -cl-std=CL2.0 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL3.0 %s | %clang -c -cl-std=CL3.0 -x cl - -o /dev/null
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability GroupNonUniformBallot
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test" %eq %ge %gt %le %lt
+               OpDecorate %eq BuiltIn SubgroupEqMask
+               OpName %eq_whole "eq_whole"
+               OpName %eq_constant "eq_constant"
+               OpName %eq_dynamic "eq_dynamic"
+               OpDecorate %ge BuiltIn SubgroupGeMask
+               OpName %ge_whole "ge_whole"
+               OpName %ge_constant "ge_constant"
+               OpName %ge_dynamic "ge_dynamic"
+               OpDecorate %gt BuiltIn SubgroupGtMask
+               OpName %gt_whole "gt_whole"
+               OpName %gt_constant "gt_constant"
+               OpName %gt_dynamic "gt_dynamic"
+               OpDecorate %le BuiltIn SubgroupLeMask
+               OpName %le_whole "le_whole"
+               OpName %le_constant "le_constant"
+               OpName %le_dynamic "le_dynamic"
+               OpDecorate %lt BuiltIn SubgroupLtMask
+               OpName %lt_whole "lt_whole"
+               OpName %lt_constant "lt_constant"
+               OpName %lt_dynamic "lt_dynamic"
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+         %v4 = OpTypeVector %uint 4
+         %in = OpTypePointer Input %v4
+        %out = OpTypePointer CrossWorkgroup %v4
+        %eq = OpVariable %in Input
+        %ge = OpVariable %in Input
+        %gt = OpVariable %in Input
+        %le = OpVariable %in Input
+        %lt = OpVariable %in Input
+      %fnty = OpTypeFunction %void %out %uint
+          %k = OpFunction %void None %fnty
+        %ptr = OpFunctionParameter %out
+        %idx = OpFunctionParameter %uint
+        %lbl = OpLabel
+  %eq_whole = OpLoad %v4 %eq
+%eq_constant = OpCompositeExtract %uint %eq_whole 1
+ %eq_dynamic = OpVectorExtractDynamic %uint %eq_whole %idx
+               OpStore %ptr %eq_whole
+  %ge_whole = OpLoad %v4 %ge
+%ge_constant = OpCompositeExtract %uint %ge_whole 1
+ %ge_dynamic = OpVectorExtractDynamic %uint %ge_whole %idx
+               OpStore %ptr %ge_whole
+  %gt_whole = OpLoad %v4 %gt
+%gt_constant = OpCompositeExtract %uint %gt_whole 1
+ %gt_dynamic = OpVectorExtractDynamic %uint %gt_whole %idx
+               OpStore %ptr %gt_whole
+  %le_whole = OpLoad %v4 %le
+%le_constant = OpCompositeExtract %uint %le_whole 1
+ %le_dynamic = OpVectorExtractDynamic %uint %le_whole %idx
+               OpStore %ptr %le_whole
+  %lt_whole = OpLoad %v4 %lt
+%lt_constant = OpCompositeExtract %uint %lt_whole 1
+ %lt_dynamic = OpVectorExtractDynamic %uint %lt_whole %idx
+               OpStore %ptr %lt_whole
+               OpReturn
+               OpFunctionEnd
+; CHECK: #pragma OPENCL EXTENSION cl_khr_subgroup_ballot : enable
+; CHECK-DAG: = get_sub_group_eq_mask()[1]
+; CHECK-DAG: = get_sub_group_eq_mask()[
+; CHECK-DAG: *{{.*}} = get_sub_group_eq_mask()
+; CHECK-DAG: = get_sub_group_ge_mask()[1]
+; CHECK-DAG: = get_sub_group_ge_mask()[
+; CHECK-DAG: *{{.*}} = get_sub_group_ge_mask()
+; CHECK-DAG: = get_sub_group_gt_mask()[1]
+; CHECK-DAG: = get_sub_group_gt_mask()[
+; CHECK-DAG: *{{.*}} = get_sub_group_gt_mask()
+; CHECK-DAG: = get_sub_group_le_mask()[1]
+; CHECK-DAG: = get_sub_group_le_mask()[
+; CHECK-DAG: *{{.*}} = get_sub_group_le_mask()
+; CHECK-DAG: = get_sub_group_lt_mask()[1]
+; CHECK-DAG: = get_sub_group_lt_mask()[
+; CHECK-DAG: *{{.*}} = get_sub_group_lt_mask()

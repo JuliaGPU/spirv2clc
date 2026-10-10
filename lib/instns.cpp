@@ -1281,6 +1281,11 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     if (*exec_scope == SpvScopeWorkgroup) {
       work_group = true;
     } else if (*exec_scope == SpvScopeSubgroup) {
+      if (m_opencl_c_version < 200) {
+        std::cerr << "UNIMPLEMENTED: subgroup barriers require OpenCL C 2.0\n";
+        return false;
+      }
+      enable_extension("cl_khr_subgroups");
       work_group = false;
     } else {
       std::cerr << "UNIMPLEMENTED OpControlBarrier execution scope "
@@ -1377,17 +1382,6 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     }
     break;
   }
-  case spv::Op::OpGroupNonUniformShuffle:
-  case spv::Op::OpGroupNonUniformShuffleXor: {
-    // Sub-group shuffle: operands are <scope> <value> <id|mask>. The scope is
-    // Subgroup; map to the cl_khr_subgroups shuffle builtins.
-    const char *fn = opcode == spv::Op::OpGroupNonUniformShuffle
-                         ? "sub_group_shuffle"
-                         : "sub_group_shuffle_xor";
-    val = call_values(
-        fn, {inst.GetSingleWordOperand(3), inst.GetSingleWordOperand(4)});
-    break;
-  }
   case spv::Op::OpGroupAsyncCopy: {
     auto execution_scope = inst.GetSingleWordOperand(2);
     auto dst_ptr = inst.GetSingleWordOperand(3);
@@ -1459,6 +1453,12 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     break;
   }
   default:
+    if (auto group = translate_group_instruction(inst, val)) {
+      if (!*group) {
+        return false;
+      }
+      break;
+    }
     std::cerr << "UNIMPLEMENTED instruction " << opcode << std::endl;
     return false;
   }
@@ -1548,10 +1548,22 @@ c::expr_ref translator_impl::builtin_scalar(SpvBuiltIn builtin) const {
   switch (builtin) {
   case SpvBuiltInWorkDim:
     return c::call("get_work_dim", {});
+  case SpvBuiltInSubgroupEqMask:
+    return c::call("get_sub_group_eq_mask", {});
+  case SpvBuiltInSubgroupGeMask:
+    return c::call("get_sub_group_ge_mask", {});
+  case SpvBuiltInSubgroupGtMask:
+    return c::call("get_sub_group_gt_mask", {});
+  case SpvBuiltInSubgroupLeMask:
+    return c::call("get_sub_group_le_mask", {});
+  case SpvBuiltInSubgroupLtMask:
+    return c::call("get_sub_group_lt_mask", {});
   case SpvBuiltInSubgroupSize:
     return c::call("get_sub_group_size", {});
   case SpvBuiltInSubgroupMaxSize:
     return c::call("get_max_sub_group_size", {});
+  case SpvBuiltInNumEnqueuedSubgroups:
+    return c::call("get_enqueued_num_sub_groups", {});
   case SpvBuiltInNumSubgroups:
     return c::call("get_num_sub_groups", {});
   case SpvBuiltInSubgroupId:
@@ -1566,6 +1578,10 @@ c::expr_ref translator_impl::builtin_scalar(SpvBuiltIn builtin) const {
 
 c::expr_ref translator_impl::builtin_vector_extract(SpvBuiltIn builtin,
                                                     c::expr_ref idx) const {
+  if (builtin >= SpvBuiltInSubgroupEqMask &&
+      builtin <= SpvBuiltInSubgroupLtMask) {
+    return c::index(builtin_scalar(builtin), std::move(idx));
+  }
   const char *query;
   switch (builtin) {
   case SpvBuiltInGlobalInvocationId:
@@ -1597,6 +1613,10 @@ c::expr_ref translator_impl::builtin_vector_extract(SpvBuiltIn builtin,
 
 c::expr_ref translator_impl::builtin_value(SpvBuiltIn builtin,
                                            uint32_t tyid) const {
+  if (builtin >= SpvBuiltInSubgroupEqMask &&
+      builtin <= SpvBuiltInSubgroupLtMask) {
+    return builtin_scalar(builtin);
+  }
   auto vec = type_for(tyid)->AsVector();
   if (!vec) {
     return builtin_scalar(builtin);

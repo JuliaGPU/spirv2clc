@@ -22,6 +22,7 @@ set(SPIRV2CLC_UNITY_SOURCES
   utils.cpp
   types.cpp
   instns.cpp
+  groups.cpp
   instns_ext.cpp)
 
 add_library(libspirv2clc

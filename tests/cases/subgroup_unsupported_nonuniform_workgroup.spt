@@ -1,0 +1,32 @@
+; RUN: not %spirv2clc --asm --spirv-version=1.4 --cl-std=CL3.0 %s 2>&1 | %FileCheck %s
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability GroupNonUniform
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "test"
+               OpName %elect "elect"
+       %void = OpTypeVoid
+       %bool = OpTypeBool
+       %uint = OpTypeInt 32 0
+        %f32 = OpTypeFloat 32
+         %v2 = OpTypeVector %uint 2
+         %v3 = OpTypeVector %uint 3
+         %v4 = OpTypeVector %uint 4
+        %sg = OpConstant %uint 2
+        %wg = OpConstant %uint 2
+       %val = OpConstant %uint 4294967290
+        %id = OpConstant %uint 0
+   %cluster = OpConstant %uint 4
+      %fval = OpConstant %f32 2.0
+      %true = OpConstantTrue %bool
+     %coord2 = OpConstantComposite %v2 %id %id
+     %coord3 = OpConstantComposite %v3 %id %id %id
+      %mask = OpConstantComposite %v4 %id %id %id %id
+      %fnty = OpTypeFunction %void
+          %k = OpFunction %void None %fnty
+        %lbl = OpLabel
+       %elect = OpGroupNonUniformElect %bool %sg
+               OpReturn
+               OpFunctionEnd
+
+; CHECK: UNIMPLEMENTED group execution scope 2

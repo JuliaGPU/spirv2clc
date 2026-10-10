@@ -1,7 +1,7 @@
 ; Sub-group shuffle ops (OpGroupNonUniformShuffle/ShuffleXor) map to the
 ; sub_group_shuffle/sub_group_shuffle_xor builtins, and an OpControlBarrier with
-; a Subgroup execution scope maps to sub_group_barrier -- all cl_khr_subgroups
-; (OpenCL C 2.0+), so fail loudly below 2.0.
+; a Subgroup execution scope maps to sub_group_barrier. Shuffles require
+; cl_khr_subgroup_shuffle; barriers require cl_khr_subgroups (OpenCL C 2.0+).
 ; RUN: not %spirv2clc --asm --spirv-version=1.4 --cl-std=CL1.2 %s
 ; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL3.0 %s | %FileCheck %s
 ; RUN: %spirv2clc --asm --spirv-version=1.4 --cl-std=CL3.0 %s | %clang -c -cl-std=CL3.0 -x cl - -o /dev/null
@@ -34,3 +34,4 @@
 ; CHECK-DAG: sub_group_shuffle(
 ; CHECK-DAG: sub_group_shuffle_xor(
 ; CHECK-DAG: sub_group_barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE)
+; CHECK-DAG: #pragma OPENCL EXTENSION cl_khr_subgroup_shuffle : enable

@@ -63,6 +63,34 @@ The tool supports the following options:
 
 - `--asm` treat the input as SPIR-V assembly in text form.
 
+# Group and sub-group operations
+
+Use `--cl-std=CL2.0` or `--cl-std=CL3.0` when translating group operations.
+The generated source calls OpenCL collective builtins, following the mappings
+in Khronos' SPIRV-LLVM-Translator. The target device must support the extensions
+used by the module; spirv2clc emits their enabling pragmas.
+
+Supported operations include:
+
+* Work-group and sub-group votes, broadcasts, and add/min/max reductions and
+  inclusive/exclusive scans (`Groups`). Sub-group broadcasts and integer
+  collectives also support the narrow types from `cl_khr_subgroup_extended_types`.
+* Non-uniform votes and election (`cl_khr_subgroup_non_uniform_vote`).
+* Ballots, inverse ballots, bit extraction/counting/scanning, first/last set-bit
+  queries, non-uniform broadcasts, and the five sub-group ballot masks
+  (`cl_khr_subgroup_ballot`).
+* Non-uniform and clustered arithmetic, bitwise, and logical collectives
+  (`cl_khr_subgroup_non_uniform_arithmetic`, `cl_khr_subgroup_clustered_reduce`).
+* Shuffles, relative shuffles, and rotations, including clustered rotations
+  (`cl_khr_subgroup_shuffle`, `cl_khr_subgroup_shuffle_relative`,
+  `cl_khr_subgroup_rotate`).
+* Sub-group size, ID, count, and enqueued-count queries, and barriers.
+
+Uniform operations accept work-group or sub-group execution scope. Non-uniform
+operations accept sub-group scope. Arithmetic collectives use scalar OpenCL
+builtin overloads; vector arithmetic is rejected. Shader quad operations and
+vendor-specific sub-group instructions remain unsupported.
+
 # Embedding as a library
 
 spirv2clc can be embedded as a library and used as follows:
