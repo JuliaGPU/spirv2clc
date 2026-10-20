@@ -23,15 +23,14 @@ uint32_t translator_impl::array_type_get_length(uint32_t tyid) const {
   auto const &length_info = tarray->length_info();
   if (length_info.words[0] !=
       spvtools::opt::analysis::Array::LengthInfo::kConstant) {
-    std::cerr << "UNIMPLEMENTED array type with non-constant length"
-              << std::endl;
+    error() << "UNIMPLEMENTED array type with non-constant length";
     return 0;
   }
 
   if (length_info.words.size() > 2) {
     for (unsigned i = 2; i < length_info.words.size(); i++) {
       if (length_info.words[i] != 0) {
-        std::cerr << "UNIMPLEMENTED array type with huge size" << std::endl;
+        error() << "UNIMPLEMENTED array type with huge size";
         return 0;
       }
     }

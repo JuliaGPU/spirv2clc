@@ -77,8 +77,7 @@ bool translator_impl::composite_member(const spvtools::opt::Instruction &inst,
       tyid = type_id_for(type->AsStruct()->element_types()[idx]);
       break;
     default:
-      std::cerr << "UNIMPLEMENTED composite member access, type "
-                << type->kind() << std::endl;
+      error() << "UNIMPLEMENTED composite member access, type " << type->kind();
       return false;
     }
   }
@@ -327,7 +326,7 @@ bool translator_impl::translate_type(const Instruction &inst) {
       signedtypestr = "long";
       break;
     default:
-      std::cerr << "UNIMPLEMENTED OpTypeInt width " << width << std::endl;
+      error() << "UNIMPLEMENTED OpTypeInt width " << width;
       return false;
     }
     break;
@@ -345,7 +344,7 @@ bool translator_impl::translate_type(const Instruction &inst) {
       typestr = "double";
       break;
     default:
-      std::cerr << "UNIMPLEMENTED OpTypeFloat width " << width << std::endl;
+      error() << "UNIMPLEMENTED OpTypeFloat width " << width;
       return false;
     }
     break;
@@ -414,9 +413,9 @@ bool translator_impl::translate_type(const Instruction &inst) {
     auto qual = inst.GetSingleWordOperand(8);
 
     if ((depth != 0) || (arrayed != 0) || (ms != 0) || (sampled != 0)) {
-      std::cerr << "UNIMPLEMENTED image type (depth = " << depth
-                << ", arrayed = " << arrayed << ", ms = " << ms
-                << "sampled = " << sampled << ")" << std::endl;
+      error() << "UNIMPLEMENTED image type (depth = " << depth
+              << ", arrayed = " << arrayed << ", ms = " << ms
+              << "sampled = " << sampled << ")";
       return false;
     }
 
@@ -431,16 +430,16 @@ bool translator_impl::translate_type(const Instruction &inst) {
       // Checked here as well as at the ImageReadWrite capability, since the
       // ReadWrite qualifier only requires Kernel.
       if (m_opencl_c_version < 200) {
-        std::cerr << "UNIMPLEMENTED: read_write images require OpenCL C 2.0 "
-                     "(targeting "
-                  << opencl_c_version_str(m_opencl_c_version) << ").\n";
+        error() << "UNIMPLEMENTED: read_write images require OpenCL C 2.0 "
+                   "(targeting "
+                << opencl_c_version_str(m_opencl_c_version) << ").";
         return false;
       }
       typestr = "read_write";
       m_read_write_images = true;
       break;
     default:
-      std::cerr << "UNIMPLEMENTED image access qualifier " << qual << std::endl;
+      error() << "UNIMPLEMENTED image access qualifier " << qual;
       return false;
     }
 
@@ -464,7 +463,7 @@ bool translator_impl::translate_type(const Instruction &inst) {
       }
       break;
     default:
-      std::cerr << "UNIMPLEMENTED image dimensionality " << dim << std::endl;
+      error() << "UNIMPLEMENTED image dimensionality " << dim;
       return false;
     }
 
@@ -493,7 +492,7 @@ bool translator_impl::translate_type(const Instruction &inst) {
     typestr = "event_t";
     break;
   default:
-    std::cerr << "UNIMPLEMENTED type instuction " << opcode << std::endl;
+    error() << "UNIMPLEMENTED type instuction " << opcode;
     return false;
   }
 
@@ -545,8 +544,7 @@ bool translator_impl::translate_types_values() {
           auto w = w1 << 32 | w0;
           m_bindings[result] = cast_to(rtype, c::literal(std::to_string(w)));
         } else {
-          std::cerr << "UNIMPLEMENTED integer constant width " << tint->width()
-                    << std::endl;
+          error() << "UNIMPLEMENTED integer constant width " << tint->width();
           return false;
         }
         break;
@@ -574,8 +572,7 @@ bool translator_impl::translate_types_values() {
           out.precision(53);
           out << std::fixed << val;
         } else {
-          std::cerr << "UNIMPLEMENTED float constant width " << width
-                    << std::endl;
+          error() << "UNIMPLEMENTED float constant width " << width;
           return false;
         }
         if (std::isinf(val) || std::isnan(val)) {
@@ -598,8 +595,7 @@ bool translator_impl::translate_types_values() {
         break;
       }
       default:
-        std::cerr << "UNIMPLEMENTED OpConstant type " << type->kind()
-                  << std::endl;
+        error() << "UNIMPLEMENTED OpConstant type " << type->kind();
         return false;
       }
       break;
@@ -691,8 +687,7 @@ bool translator_impl::translate_types_values() {
             c::compound_literal(src_type(rtype), {c::init_list(elems)});
         break;
       default:
-        std::cerr << "UNIMPLEMENTED OpConstantComposite type " << type->kind()
-                  << std::endl;
+        error() << "UNIMPLEMENTED OpConstantComposite type " << type->kind();
         return false;
       }
       break;
@@ -718,9 +713,8 @@ bool translator_impl::translate_types_values() {
         // Single-index element offset on a pointer: base + index. (Further
         // struct/array indices are not produced by these constant initializers.)
         if (inst.NumOperands() != 5) {
-          std::cerr << "UNIMPLEMENTED OpSpecConstantOp PtrAccessChain with "
-                       "multiple indices"
-                    << std::endl;
+          error() << "UNIMPLEMENTED OpSpecConstantOp PtrAccessChain with "
+                     "multiple indices";
           return false;
         }
         auto base = inst.GetSingleWordOperand(3);
@@ -730,8 +724,8 @@ bool translator_impl::translate_types_values() {
         break;
       }
       default:
-        std::cerr << "UNIMPLEMENTED OpSpecConstantOp sub-opcode "
-                  << static_cast<uint32_t>(subop) << std::endl;
+        error() << "UNIMPLEMENTED OpSpecConstantOp sub-opcode "
+                << static_cast<uint32_t>(subop);
         return false;
       }
       break;
@@ -744,8 +738,7 @@ bool translator_impl::translate_types_values() {
       auto tyvar = type_for(rtype);
       auto tykind = tyvar->kind();
       if (tykind != Type::Kind::kPointer) {
-        std::cerr << "UNIMPLEMENTED global variable with type " << tykind
-                  << std::endl;
+        error() << "UNIMPLEMENTED global variable with type " << tykind;
         return false;
       }
 
@@ -800,9 +793,9 @@ bool translator_impl::translate_types_values() {
         // Program-scope global variable. Legal only from OpenCL C 2.0 on; below
         // that, program-scope variables must live in the constant address space.
         if (m_opencl_c_version < 200) {
-          std::cerr << "UNIMPLEMENTED: program-scope global variable requires "
-                       "OpenCL C 2.0 (targeting "
-                    << opencl_c_version_str(m_opencl_c_version) << ").\n";
+          error() << "UNIMPLEMENTED: program-scope global variable requires "
+                     "OpenCL C 2.0 (targeting "
+                  << opencl_c_version_str(m_opencl_c_version) << ").";
           return false;
         }
         // As with UniformConstant, declare the storage as a value and make every
@@ -818,15 +811,15 @@ bool translator_impl::translate_types_values() {
         m_out.globals << ";" << std::endl;
         m_bindings[result] = c::address_of(c::name(storagename));
       } else {
-        std::cerr << "UNIMPLEMENTED global variable with storage class "
-                  << storage << std::endl;
+        error() << "UNIMPLEMENTED global variable with storage class "
+                << storage;
         return false;
       }
 
       break;
     }
     default:
-      std::cerr << "UNIMPLEMENTED type/value instruction " << opcode << ".\n";
+      error() << "UNIMPLEMENTED type/value instruction " << opcode << ".";
       return false;
     }
   }
