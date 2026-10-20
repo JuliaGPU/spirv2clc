@@ -104,6 +104,39 @@ std::vector<uint32_t> binary;
 int err = translator.translate(binary, &srcgen);
 ```
 
+Diagnostics are printed to stderr, unless a handler is installed with
+`translator.set_diagnostic_handler`.
+
+## C API
+
+For use from C, or from languages that can call C but not C++, the build also
+produces a shared library, `libspirv2clc`, with the C API declared in
+`libspirv2clc.h`. It exports nothing but that API, with the translator and
+SPIRV-Tools linked in, so it has no dependencies besides the C and C++ runtime
+libraries:
+
+```
+#include "libspirv2clc.h"
+
+SPIRV2CLCTranslateOptions options = {
+    1, 4, /* validate as SPIR-V 1.4 */
+    300   /* emit OpenCL C 3.0 */
+};
+char *source, *message;
+if (SPIRV2CLCTranslate(binary, size_in_bytes, &options, NULL, NULL, &source,
+                       &message)) {
+  fprintf(stderr, "%s\n", message);
+  SPIRV2CLCDisposeMessage(message);
+} else {
+  /* use source */
+  SPIRV2CLCDisposeMessage(source);
+}
+```
+
+Pass a callback to receive the diagnostics (including warnings) instead of
+having them printed to stderr. `cmake --install . --component c_api` installs
+only the library and its header.
+
 ## Installation
 
 To install the library, first check you're building with the right CMake variables set:

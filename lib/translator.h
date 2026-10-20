@@ -27,6 +27,7 @@
 #include <vector>
 
 #include "cexpr.h"
+#include "spirv2clc.h"
 #include <spirv-tools/libspirv.h>
 #include <spirv/unified1/spirv.h>
 
@@ -46,6 +47,8 @@ class Type;
 } // namespace spvtools
 
 namespace spirv2clc {
+
+class diagnostic;
 
 // Hands out C identifiers, unique across the whole program and clear of C and
 // OpenCL C keywords and type names. Every identifier the translator emits comes
@@ -128,6 +131,8 @@ struct translator_impl {
 
   int translate(const std::string &assembly, std::string *srcout);
   int translate(const std::vector<uint32_t> &binary, std::string *srcout);
+
+  diagnostic_handler m_diagnostic_handler;
 
 private:
   uint32_t type_id_for(uint32_t val) const;
@@ -425,6 +430,15 @@ private:
 
   bool validate_module(const std::vector<uint32_t> &binary) const;
   int translate();
+
+  // An error message, streamed into like std::cerr and reported when the
+  // statement ends.
+  diagnostic error() const;
+
+  // Reports what SPIRV-Tools says while parsing the module.
+  void report_spvtools_message(spv_message_level_t level,
+                               const spv_position_t &position,
+                               const char *message, bool text_input) const;
 
   // Record that `what` can't be translated: emit a diagnostic, flag the failure
   // so translate() returns an error rather than silently producing a

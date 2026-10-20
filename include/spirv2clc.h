@@ -15,6 +15,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -25,6 +26,12 @@
 namespace spirv2clc {
 
 struct translator_impl;
+
+enum class severity { error, warning, remark };
+
+// Receives each diagnostic as one message, without a trailing newline.
+using diagnostic_handler =
+    std::function<void(severity, const std::string &message)>;
 
 struct translator {
 
@@ -38,6 +45,9 @@ struct translator {
   LIBSPIRV2CLC_EXPORT translator(translator &&);
   LIBSPIRV2CLC_EXPORT translator &operator=(translator &&);
   LIBSPIRV2CLC_EXPORT ~translator();
+
+  // Diagnostics are printed to stderr unless a handler is set.
+  LIBSPIRV2CLC_EXPORT void set_diagnostic_handler(diagnostic_handler handler);
 
   LIBSPIRV2CLC_EXPORT int translate(const std::string &assembly,
                                     std::string *srcout);

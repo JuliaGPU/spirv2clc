@@ -49,8 +49,7 @@ bool translator_impl::emit_access_chain(const Instruction &inst,
       auto cstmgr = m_ir->get_constant_mgr();
       auto idx_cst = cstmgr->FindDeclaredConstant(idx);
       if (idx_cst == nullptr) {
-        std::cerr << "UNIMPLEMENTED struct access with non-constant index"
-                  << std::endl;
+        error() << "UNIMPLEMENTED struct access with non-constant index";
         return false;
       }
       uint32_t struct_idx = idx_cst->GetU32();
@@ -60,8 +59,7 @@ bool translator_impl::emit_access_chain(const Instruction &inst,
       break;
     }
     default:
-      std::cerr << "UNIMPLEMENTED access chain type " << cty->kind()
-                << std::endl;
+      error() << "UNIMPLEMENTED access chain type " << cty->kind();
       return false;
     }
   }
@@ -111,7 +109,7 @@ std::optional<uint32_t>
 translator_impl::constant_operand(uint32_t id, const char *what) const {
   auto cst = m_ir->get_constant_mgr()->FindDeclaredConstant(id);
   if (cst == nullptr) {
-    std::cerr << "UNIMPLEMENTED non-constant " << what << std::endl;
+    error() << "UNIMPLEMENTED non-constant " << what;
     return std::nullopt;
   }
   return cst->GetU32();
@@ -131,7 +129,7 @@ c::expr_ref translator_impl::memory_scope(uint32_t scope) const {
   case SpvScopeInvocation:
     return c::name("memory_scope_work_group");
   default:
-    std::cerr << "UNIMPLEMENTED memory scope " << scope << std::endl;
+    error() << "UNIMPLEMENTED memory scope " << scope;
     return nullptr;
   }
 }
@@ -297,7 +295,7 @@ bool translator_impl::emit_image_access(const Instruction &inst,
     }
   }
   if (suffix.empty()) {
-    std::cerr << "UNIMPLEMENTED image texel type " << texel_tyid << std::endl;
+    error() << "UNIMPLEMENTED image texel type " << texel_tyid;
     return false;
   }
 
@@ -308,7 +306,7 @@ bool translator_impl::emit_image_access(const Instruction &inst,
       SpvImageOperandsSignExtendMask | SpvImageOperandsZeroExtendMask;
   if ((operands & ~extend) || (operands == extend) ||
       (operands && suffix != "i")) {
-    std::cerr << "UNIMPLEMENTED image operands " << operands << std::endl;
+    error() << "UNIMPLEMENTED image operands " << operands;
     return false;
   }
 
@@ -325,8 +323,7 @@ bool translator_impl::emit_image_access(const Instruction &inst,
   unsigned ncoords = coord_vec ? coord_vec->element_count() : 1;
   if (coord_elem->kind() != Type::Kind::kInteger ||
       !(ncoords == dims || (dims == 3 && ncoords == 4))) {
-    std::cerr << "UNIMPLEMENTED image coordinate type " << type_id_for(coord_ty)
-              << std::endl;
+    error() << "UNIMPLEMENTED image coordinate type " << type_id_for(coord_ty);
     return false;
   }
   auto as_int = [](unsigned n, c::expr_ref e) {
@@ -705,17 +702,17 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     // are atomic for every work-item accessing the memory, which is as wide as
     // any scope gets without shared virtual memory.
     if (order_of(*mem_sem) != memory_order::relaxed) {
-      std::cerr << "UNIMPLEMENTED: ordered atomics require OpenCL C 2.0 "
-                   "(targeting "
-                << opencl_c_version_str(m_opencl_c_version) << ").\n";
+      error() << "UNIMPLEMENTED: ordered atomics require OpenCL C 2.0 "
+                 "(targeting "
+              << opencl_c_version_str(m_opencl_c_version) << ").";
       return false;
     }
     if (opcode == spv::Op::OpAtomicFAddEXT ||
         opcode == spv::Op::OpAtomicFMinEXT ||
         opcode == spv::Op::OpAtomicFMaxEXT) {
-      std::cerr << "UNIMPLEMENTED: floating-point atomics require OpenCL C "
-                   "2.0 (targeting "
-                << opencl_c_version_str(m_opencl_c_version) << ").\n";
+      error() << "UNIMPLEMENTED: floating-point atomics require OpenCL C "
+                 "2.0 (targeting "
+              << opencl_c_version_str(m_opencl_c_version) << ").";
       return false;
     }
     static std::unordered_map<spv::Op, const char *> fns{
@@ -781,9 +778,9 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     }
     if (order_of(*sem_equal) != memory_order::relaxed ||
         order_of(*sem_unequal) != memory_order::relaxed) {
-      std::cerr << "UNIMPLEMENTED: ordered atomics require OpenCL C 2.0 "
-                   "(targeting "
-                << opencl_c_version_str(m_opencl_c_version) << ").\n";
+      error() << "UNIMPLEMENTED: ordered atomics require OpenCL C 2.0 "
+                 "(targeting "
+              << opencl_c_version_str(m_opencl_c_version) << ").";
       return false;
     }
     val = call_values(atomic_builtin("cmpxchg", ptr), {ptr, cmp, desired});
@@ -793,9 +790,9 @@ bool translator_impl::translate_instruction(const Instruction &inst,
   case spv::Op::OpAtomicStore: {
     // OpenCL C 1.x has no atomic loads and stores.
     if (m_opencl_c_version < 200) {
-      std::cerr << "UNIMPLEMENTED: atomic load/store require OpenCL C 2.0 "
-                   "(targeting "
-                << opencl_c_version_str(m_opencl_c_version) << ").\n";
+      error() << "UNIMPLEMENTED: atomic load/store require OpenCL C 2.0 "
+                 "(targeting "
+              << opencl_c_version_str(m_opencl_c_version) << ").";
       return false;
     }
     bool is_load = opcode == spv::Op::OpAtomicLoad;
@@ -853,9 +850,9 @@ bool translator_impl::translate_instruction(const Instruction &inst,
       break;
     }
     if (order_of(*mem_sem) != memory_order::relaxed) {
-      std::cerr << "UNIMPLEMENTED: ordered atomics require OpenCL C 2.0 "
-                   "(targeting "
-                << opencl_c_version_str(m_opencl_c_version) << ").\n";
+      error() << "UNIMPLEMENTED: ordered atomics require OpenCL C 2.0 "
+                 "(targeting "
+              << opencl_c_version_str(m_opencl_c_version) << ").";
       return false;
     }
     // OpenCL C 1.x has no flags, but the flag is a 32-bit integer that only
@@ -1282,14 +1279,14 @@ bool translator_impl::translate_instruction(const Instruction &inst,
       work_group = true;
     } else if (*exec_scope == SpvScopeSubgroup) {
       if (m_opencl_c_version < 200) {
-        std::cerr << "UNIMPLEMENTED: subgroup barriers require OpenCL C 2.0\n";
+        error() << "UNIMPLEMENTED: subgroup barriers require OpenCL C 2.0";
         return false;
       }
       enable_extension("cl_khr_subgroups");
       work_group = false;
     } else {
-      std::cerr << "UNIMPLEMENTED OpControlBarrier execution scope "
-                << *exec_scope << std::endl;
+      error() << "UNIMPLEMENTED OpControlBarrier execution scope "
+              << *exec_scope;
       return false;
     }
 
@@ -1302,9 +1299,9 @@ bool translator_impl::translate_instruction(const Instruction &inst,
       break;
     }
     if (m_opencl_c_version < 200) {
-      std::cerr << "UNIMPLEMENTED: barriers fencing beyond the work-group "
-                   "require OpenCL C 2.0 (targeting "
-                << opencl_c_version_str(m_opencl_c_version) << ").\n";
+      error() << "UNIMPLEMENTED: barriers fencing beyond the work-group "
+                 "require OpenCL C 2.0 (targeting "
+              << opencl_c_version_str(m_opencl_c_version) << ").";
       return false;
     }
     auto scope_arg = memory_scope(*mem_scope);
@@ -1345,9 +1342,9 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     // mem_fence orders memory within the work-group.
     if (m_opencl_c_version < 200) {
       if (scope_width(*scope) > scope_width(SpvScopeWorkgroup)) {
-        std::cerr << "UNIMPLEMENTED: fences beyond the work-group require "
-                     "OpenCL C 2.0 (targeting "
-                  << opencl_c_version_str(m_opencl_c_version) << ").\n";
+        error() << "UNIMPLEMENTED: fences beyond the work-group require "
+                   "OpenCL C 2.0 (targeting "
+                << opencl_c_version_str(m_opencl_c_version) << ").";
         return false;
       }
       fb.expression(c::call("mem_fence", {fence_flags(*mem_sem)}));
@@ -1394,16 +1391,15 @@ bool translator_impl::translate_instruction(const Instruction &inst,
 
     auto exec_scope_cst = cstmgr->FindDeclaredConstant(execution_scope);
     if (exec_scope_cst == nullptr) {
-      std::cerr
-          << "UNIMPLEMENTED OpGroupAsyncCopy with non-constant execution scope"
-          << execution_scope << std::endl;
+      error() << "UNIMPLEMENTED OpGroupAsyncCopy with non-constant execution "
+                 "scope "
+              << execution_scope;
       return false;
     }
 
     if (exec_scope_cst->GetU32() != SpvScopeWorkgroup) {
-      std::cerr
-          << "UNIMPLEMENTED OpGroupAsyncCopy with non-workgroup execution scope"
-          << std::endl;
+      error() << "UNIMPLEMENTED OpGroupAsyncCopy with non-workgroup execution "
+                 "scope";
       return false;
     }
 
@@ -1428,16 +1424,14 @@ bool translator_impl::translate_instruction(const Instruction &inst,
 
     auto exec_scope_cst = cstmgr->FindDeclaredConstant(execution_scope);
     if (exec_scope_cst == nullptr) {
-      std::cerr
-          << "UNIMPLEMENTED OpGroupWaitEvents with non-constant execution scope"
-          << std::endl;
+      error() << "UNIMPLEMENTED OpGroupWaitEvents with non-constant execution "
+                 "scope";
       return false;
     }
 
     if (exec_scope_cst->GetU32() != SpvScopeWorkgroup) {
-      std::cerr << "UNIMPLEMENTED OpGroupWaitEvents with non-workgroup "
-                   "execution scope"
-                << std::endl;
+      error() << "UNIMPLEMENTED OpGroupWaitEvents with non-workgroup "
+                 "execution scope";
       return false;
     }
 
@@ -1459,7 +1453,7 @@ bool translator_impl::translate_instruction(const Instruction &inst,
       }
       break;
     }
-    std::cerr << "UNIMPLEMENTED instruction " << opcode << std::endl;
+    error() << "UNIMPLEMENTED instruction " << opcode;
     return false;
   }
 

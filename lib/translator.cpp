@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <cstring>
 #include <functional>
+#include <iostream>
 #include <set>
 
 using namespace spvtools;
@@ -59,37 +60,59 @@ std::string rounding_mode(SpvFPRoundingMode mode) {
   return "UNKNOWN ROUNDING MODE";
 }
 
-const spvtools::MessageConsumer spvtools_message_consumer =
-    [](spv_message_level_t level, const char *, const spv_position_t &position,
-       const char *message) {
-      const char *levelstr = "UNKNOWN";
-      switch (level) {
-      case SPV_MSG_FATAL:
-        levelstr = "FATAL";
-        break;
-      case SPV_MSG_INTERNAL_ERROR:
-        levelstr = "INTERNAL ERROR";
-        break;
-      case SPV_MSG_ERROR:
-        levelstr = "ERROR";
-        break;
-      case SPV_MSG_WARNING:
-        levelstr = "WARNING";
-        break;
-      case SPV_MSG_INFO:
-        levelstr = "INFO";
-        break;
-      case SPV_MSG_DEBUG:
-        levelstr = "DEBUG";
-        break;
-      }
-      printf("spvtools says '%s' (%s) at position %zu", message, levelstr,
-             position.index);
-    };
+void print_diagnostic(spirv2clc::severity sev, const std::string &message) {
+  switch (sev) {
+  case spirv2clc::severity::error:
+    std::cerr << "error: ";
+    break;
+  case spirv2clc::severity::warning:
+    std::cerr << "warning: ";
+    break;
+  case spirv2clc::severity::remark:
+    std::cerr << "remark: ";
+    break;
+  }
+  std::cerr << message << std::endl;
+}
 
 } // namespace
 
 namespace spirv2clc {
+
+// Defined here rather than in translator.h so that the operator<< overloads
+// above are found when streaming SPIR-V enums into it.
+class diagnostic {
+public:
+  diagnostic(const diagnostic_handler &handler, severity sev, bool &failed)
+      : m_handler(handler), m_severity(sev), m_failed(failed) {}
+  diagnostic(const diagnostic &) = delete;
+
+  // No exception may leave a destructor, and SPIRV-Tools reports messages from
+  // its own destructors too, so a diagnostic that can't be delivered fails the
+  // translation instead.
+  ~diagnostic() {
+    try {
+      std::string message = m_message.str();
+      while (!message.empty() && message.back() == '\n') {
+        message.pop_back();
+      }
+      m_handler(m_severity, message);
+    } catch (...) {
+      m_failed = true;
+    }
+  }
+
+  template <typename T> diagnostic &operator<<(const T &value) {
+    m_message << value;
+    return *this;
+  }
+
+private:
+  const diagnostic_handler &m_handler;
+  severity m_severity;
+  bool &m_failed;
+  std::ostringstream m_message;
+};
 
 translator::translator(spv_target_env env, unsigned opencl_c_version)
     : m_impl(std::make_unique<translator_impl>(env, opencl_c_version)) {}
@@ -97,6 +120,11 @@ translator::translator(spv_target_env env, unsigned opencl_c_version)
 translator::~translator() = default;
 translator::translator(translator &&) = default;
 translator &translator::operator=(translator &&) = default;
+
+void translator::set_diagnostic_handler(diagnostic_handler handler) {
+  m_impl->m_diagnostic_handler =
+      handler ? std::move(handler) : diagnostic_handler(print_diagnostic);
+}
 
 int translator::translate(const std::string &assembly, std::string *srcout) {
   return m_impl->translate(assembly, srcout);
@@ -108,12 +136,47 @@ int translator::translate(const std::vector<uint32_t> &binary,
 }
 
 translator_impl::translator_impl(spv_target_env env, unsigned opencl_c_version)
-    : m_target_env(env), m_opencl_c_version(opencl_c_version) {}
+    : m_diagnostic_handler(print_diagnostic), m_target_env(env),
+      m_opencl_c_version(opencl_c_version) {}
 
 translator_impl::~translator_impl() = default;
 
+diagnostic translator_impl::error() const {
+  return diagnostic(m_diagnostic_handler, severity::error,
+                    m_translation_failed);
+}
+
+void translator_impl::report_spvtools_message(spv_message_level_t level,
+                                              const spv_position_t &position,
+                                              const char *message,
+                                              bool text_input) const {
+  severity sev = severity::remark;
+  switch (level) {
+  case SPV_MSG_FATAL:
+  case SPV_MSG_INTERNAL_ERROR:
+  case SPV_MSG_ERROR:
+    sev = severity::error;
+    break;
+  case SPV_MSG_WARNING:
+    sev = severity::warning;
+    break;
+  case SPV_MSG_INFO:
+  case SPV_MSG_DEBUG:
+    break;
+  }
+  // Positions as spvDiagnosticPrint shows them: line and column of the
+  // assembly, or the word offset into the binary.
+  diagnostic diag(m_diagnostic_handler, sev, m_translation_failed);
+  if (text_input) {
+    diag << position.line + 1 << ":" << position.column + 1 << ": ";
+  } else if (position.index > 0) {
+    diag << position.index << ": ";
+  }
+  diag << message;
+}
+
 std::string translator_impl::note_unsupported(const std::string &what) const {
-  std::cerr << "UNIMPLEMENTED " << what << std::endl;
+  error() << "UNIMPLEMENTED " << what;
   m_translation_failed = true;
   return "UNIMPLEMENTED";
 }
@@ -140,8 +203,9 @@ bool translator_impl::translate_capabilities() {
   // require it; refuse below 2.0 rather than emit an invalid pragma.
   auto require_subgroups = [&](const char *what) {
     if (m_opencl_c_version < 200) {
-      std::cerr << "UNIMPLEMENTED: " << what << " require OpenCL C 2.0 (targeting "
-                << opencl_c_version_str(m_opencl_c_version) << ").\n";
+      error() << "UNIMPLEMENTED: " << what
+              << " require OpenCL C 2.0 (targeting "
+              << opencl_c_version_str(m_opencl_c_version) << ").";
       return false;
     }
     enable_extension("cl_khr_subgroups");
@@ -192,9 +256,9 @@ bool translator_impl::translate_capabilities() {
       // The generic address space is core in OpenCL C 2.0; see the matching
       // mapping of SpvStorageClassGeneric in src_pointer_type (types.cpp).
       if (m_opencl_c_version < 200) {
-        std::cerr << "UNIMPLEMENTED: generic address space requires OpenCL C "
-                     "2.0 (targeting "
-                  << opencl_c_version_str(m_opencl_c_version) << ").\n";
+        error() << "UNIMPLEMENTED: generic address space requires OpenCL C "
+                   "2.0 (targeting "
+                << opencl_c_version_str(m_opencl_c_version) << ").";
         return false;
       }
       break;
@@ -203,16 +267,16 @@ bool translator_impl::translate_capabilities() {
       // __opencl_c_read_write_images); see also the ReadWrite qualifier in
       // translate_type (types.cpp).
       if (m_opencl_c_version < 200) {
-        std::cerr << "UNIMPLEMENTED: read_write images require OpenCL C 2.0 "
-                     "(targeting "
-                  << opencl_c_version_str(m_opencl_c_version) << ").\n";
+        error() << "UNIMPLEMENTED: read_write images require OpenCL C 2.0 "
+                   "(targeting "
+                << opencl_c_version_str(m_opencl_c_version) << ").";
         return false;
       }
       break;
     case SpvCapabilityGroups:
       // Groups also covers work-group collectives, which do not need subgroups.
       if (m_opencl_c_version < 200) {
-        std::cerr << "UNIMPLEMENTED: group operations require OpenCL C 2.0\n";
+        error() << "UNIMPLEMENTED: group operations require OpenCL C 2.0";
         return false;
       }
       break;
@@ -267,7 +331,7 @@ bool translator_impl::translate_capabilities() {
       enable_extension("cl_ext_float_atomics");
       break;
     default:
-      std::cerr << "UNIMPLEMENTED capability " << cap << ".\n";
+      error() << "UNIMPLEMENTED capability " << cap << ".";
       return false;
     }
   }
@@ -288,7 +352,7 @@ bool translator_impl::translate_extensions() const {
     auto &op_ext = inst.GetOperand(0);
     auto ext = op_ext.AsString();
     if (!handled.count(ext)) {
-      std::cerr << "UNIMPLEMENTED extension " << ext << ".\n";
+      error() << "UNIMPLEMENTED extension " << ext << ".";
       return false;
     }
   }
@@ -300,7 +364,7 @@ bool translator_impl::translate_extended_instructions_imports() const {
     assert(inst.opcode() == spv::Op::OpExtInstImport);
     auto name = inst.GetOperand(1).AsString();
     if (name != "OpenCL.std") {
-      std::cerr << "UNIMPLEMENTED extended instruction set.\n";
+      error() << "UNIMPLEMENTED extended instruction set.";
       return false;
     }
   }
@@ -368,7 +432,7 @@ bool translator_impl::translate_execution_modes() {
     case SpvExecutionModeLocalSizeHint:
       break;
     default:
-      std::cerr << "UNIMPLEMENTED execution mode " << mode << ".\n";
+      error() << "UNIMPLEMENTED execution mode " << mode << ".";
       return false;
     }
   }
@@ -384,8 +448,7 @@ bool translator_impl::translate_debug_instructions() {
     case spv::Op::OpString:
       break;
     default:
-      std::cerr << "UNIMPLEMENTED debug instructions in 7a " << opcode
-                << std::endl;
+      error() << "UNIMPLEMENTED debug instructions in 7a " << opcode;
       return false;
     }
   }
@@ -400,15 +463,14 @@ bool translator_impl::translate_debug_instructions() {
       break;
     }
     default:
-      std::cerr << "UNIMPLEMENTED debug instructions " << opcode << ".\n";
+      error() << "UNIMPLEMENTED debug instructions " << opcode << ".";
       return false;
     }
   }
 
   // Debug 3
   for (auto &inst : m_ir->module()->debugs3()) {
-    std::cerr << "UNIMPLEMENTED debug instruction " << inst.opcode()
-              << " in 7c.\n";
+    error() << "UNIMPLEMENTED debug instruction " << inst.opcode() << " in 7c.";
     return false;
   }
 
@@ -446,8 +508,7 @@ bool translator_impl::translate_annotations() {
           m_byval_params.insert(target);
           break;
         default:
-          std::cerr << "UNIMPLEMENTED FuncParamAttr " << param_attr
-                    << std::endl;
+          error() << "UNIMPLEMENTED FuncParamAttr " << param_attr;
           return false;
         }
         break;
@@ -480,16 +541,16 @@ bool translator_impl::translate_annotations() {
           // cl_khr_subgroups (OpenCL C 2.0+), including when no dispatch
           // capability is declared.
           if (m_opencl_c_version < 200) {
-            std::cerr << "UNIMPLEMENTED: subgroup builtins require OpenCL C 2.0 "
-                         "(targeting "
-                      << opencl_c_version_str(m_opencl_c_version) << ").\n";
+            error() << "UNIMPLEMENTED: subgroup builtins require OpenCL C 2.0 "
+                       "(targeting "
+                    << opencl_c_version_str(m_opencl_c_version) << ").";
             return false;
           }
           enable_extension("cl_khr_subgroups");
           m_builtin_variables[target] = static_cast<SpvBuiltIn>(builtin);
           break;
         default:
-          std::cerr << "UNIMPLEMENTED builtin " << builtin << std::endl;
+          error() << "UNIMPLEMENTED builtin " << builtin;
           return false;
         }
         break;
@@ -549,7 +610,7 @@ bool translator_impl::translate_annotations() {
         // Pointer access-range hints; nothing to emit.
         break;
       default:
-        std::cerr << "UNIMPLEMENTED decoration " << decoration << std::endl;
+        error() << "UNIMPLEMENTED decoration " << decoration;
         return false;
       }
       break;
@@ -604,8 +665,7 @@ bool translator_impl::translate_annotations() {
       break;
     }
     default:
-      std::cerr << "UNIMPLEMENTED annotation instruction " << opcode
-                << std::endl;
+      error() << "UNIMPLEMENTED annotation instruction " << opcode;
       return false;
     }
   }
@@ -972,8 +1032,6 @@ bool translator_impl::translate_function(Function &func) {
 
 int translator_impl::translate() {
 
-  reset();
-
   // 1. Capabilities
   if (!translate_capabilities()) {
     return 1;
@@ -1050,24 +1108,36 @@ int translator_impl::translate() {
 
 bool translator_impl::validate_module(
     const std::vector<uint32_t> &binary) const {
-  spv_diagnostic diag;
+  spv_diagnostic diag = nullptr;
   spv_context ctx = spvContextCreate(m_target_env);
   spv_result_t res =
       spvValidateBinary(ctx, binary.data(), binary.size(), &diag);
   spvContextDestroy(ctx);
-  spvDiagnosticPrint(diag);
-  spvDiagnosticDestroy(diag);
-  if (res != SPV_SUCCESS) {
-    return false;
+  if (diag) {
+    report_spvtools_message(res == SPV_SUCCESS ? SPV_MSG_WARNING
+                                               : SPV_MSG_ERROR,
+                            diag->position, diag->error, false);
+    spvDiagnosticDestroy(diag);
+  } else if (res != SPV_SUCCESS) {
+    error() << "invalid SPIR-V module";
   }
-  // std::cout << "Module valid.\n";
-  return true;
+  return res == SPV_SUCCESS;
 }
 
 int translator_impl::translate(const std::string &assembly,
                                std::string *srcout) {
 
-  m_ir = BuildModule(m_target_env, spvtools_message_consumer, assembly);
+  reset();
+  m_ir = BuildModule(
+      m_target_env,
+      [this](spv_message_level_t level, const char *,
+             const spv_position_t &position, const char *message) {
+        report_spvtools_message(level, position, message, true);
+      },
+      assembly);
+  if (!m_ir) {
+    return 1;
+  }
 
   std::vector<uint32_t> module_bin;
   m_ir->module()->ToBinary(&module_bin, false);
@@ -1087,8 +1157,17 @@ int translator_impl::translate(const std::string &assembly,
 int translator_impl::translate(const std::vector<uint32_t> &binary,
                                std::string *srcout) {
 
-  m_ir = BuildModule(m_target_env, spvtools_message_consumer,
-                     binary.data(), binary.size());
+  reset();
+  m_ir = BuildModule(
+      m_target_env,
+      [this](spv_message_level_t level, const char *,
+             const spv_position_t &position, const char *message) {
+        report_spvtools_message(level, position, message, false);
+      },
+      binary.data(), binary.size());
+  if (!m_ir) {
+    return 1;
+  }
 
   if (!validate_module(binary)) {
     return 1;

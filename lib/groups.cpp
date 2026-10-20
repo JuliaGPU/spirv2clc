@@ -103,11 +103,11 @@ translator_impl::translate_group_instruction(const Instruction &inst,
   const bool uniform = inst.opcode() >= spv::Op::OpGroupAll &&
                        inst.opcode() <= spv::Op::OpGroupSMax;
   if (*scope != SpvScopeSubgroup && !(uniform && *scope == SpvScopeWorkgroup)) {
-    std::cerr << "UNIMPLEMENTED group execution scope " << *scope << std::endl;
+    error() << "UNIMPLEMENTED group execution scope " << *scope;
     return false;
   }
   if (m_opencl_c_version < 200) {
-    std::cerr << "UNIMPLEMENTED: group operations require OpenCL C 2.0\n";
+    error() << "UNIMPLEMENTED: group operations require OpenCL C 2.0";
     return false;
   }
   if (*scope == SpvScopeSubgroup) {
@@ -146,13 +146,13 @@ translator_impl::translate_group_instruction(const Instruction &inst,
       break;
     case SpvGroupOperationClusteredReduce:
       if (uniform || ballot) {
-        std::cerr << "UNIMPLEMENTED clustered uniform or ballot operation\n";
+        error() << "UNIMPLEMENTED clustered uniform or ballot operation";
         return false;
       }
       name += "clustered_reduce";
       break;
     default:
-      std::cerr << "UNIMPLEMENTED group operation " << operation << std::endl;
+      error() << "UNIMPLEMENTED group operation " << operation;
       return false;
     }
     if (!ballot) {
@@ -166,7 +166,7 @@ translator_impl::translate_group_instruction(const Instruction &inst,
       if (ty->AsVector() ||
           (uniform && *scope == SpvScopeWorkgroup && ty->AsInteger() &&
            ty->AsInteger()->width() < 32)) {
-        std::cerr << "UNIMPLEMENTED group arithmetic operand type\n";
+        error() << "UNIMPLEMENTED group arithmetic operand type";
         return false;
       }
       if (uniform && *scope == SpvScopeSubgroup && ty->AsInteger() &&
@@ -189,7 +189,7 @@ translator_impl::translate_group_instruction(const Instruction &inst,
       } else if (*scope == SpvScopeWorkgroup &&
                  (ty->AsVector() ||
                   (ty->AsInteger() && ty->AsInteger()->width() < 32))) {
-        std::cerr << "UNIMPLEMENTED work-group broadcast operand type\n";
+        error() << "UNIMPLEMENTED work-group broadcast operand type";
         return false;
       }
     }
@@ -201,7 +201,7 @@ translator_impl::translate_group_instruction(const Instruction &inst,
     auto ty = type_for_val(inst.GetSingleWordOperand(first_arg));
     if (ty->AsVector() && inst.opcode() != spv::Op::OpGroupBroadcast &&
         inst.opcode() != spv::Op::OpGroupNonUniformBroadcast) {
-      std::cerr << "UNIMPLEMENTED subgroup operand type\n";
+      error() << "UNIMPLEMENTED subgroup operand type";
       return false;
     }
   }

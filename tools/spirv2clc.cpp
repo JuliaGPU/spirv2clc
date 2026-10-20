@@ -141,6 +141,11 @@ int main(int argc, char *argv[]) {
     file.seekg(0, std::ios::end);
     uint32_t size = file.tellg();
     file.seekg(0, std::ios::beg);
+    if (size % sizeof(uint32_t) != 0) {
+      std::cerr << fname << " is not a SPIR-V binary (its size is not a "
+                << "multiple of 4 bytes)" << std::endl;
+      exit(EXIT_FAILURE);
+    }
     std::vector<uint32_t> binary(size / sizeof(uint32_t));
     file.read(reinterpret_cast<char *>(binary.data()), size);
     err = translator.translate(binary, &srcgen);

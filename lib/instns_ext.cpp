@@ -322,8 +322,7 @@ bool translator_impl::translate_extended_instruction(const Instruction &inst,
       break;
     }
     default:
-      std::cerr << "UNIMPLEMENTED extended instruction " << instruction
-                << std::endl;
+      error() << "UNIMPLEMENTED extended instruction " << instruction;
       return false;
     }
   }
