@@ -1068,6 +1068,9 @@ int translator_impl::translate(const std::string &assembly,
                                std::string *srcout) {
 
   m_ir = BuildModule(m_target_env, spvtools_message_consumer, assembly);
+  if (!m_ir) {
+    return 1;
+  }
 
   std::vector<uint32_t> module_bin;
   m_ir->module()->ToBinary(&module_bin, false);
@@ -1089,6 +1092,9 @@ int translator_impl::translate(const std::vector<uint32_t> &binary,
 
   m_ir = BuildModule(m_target_env, spvtools_message_consumer,
                      binary.data(), binary.size());
+  if (!m_ir) {
+    return 1;
+  }
 
   if (!validate_module(binary)) {
     return 1;
