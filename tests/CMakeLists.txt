@@ -17,6 +17,8 @@ if(NOT WIN32)
   add_subdirectory(testlayer)
 endif()
 
+add_subdirectory(capi)
+
 # ---------------------------------------------------------------------------
 # lit-based regression tests
 #
