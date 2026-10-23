@@ -674,7 +674,9 @@ bool translator_impl::translate_annotations() {
 
 void translator_impl::assign_names() {
   // Names fixed by the module's interface first, so nothing else can take
-  // them. Entry points are named by their OpEntryPoint.
+  // them. Entry points are named by their OpEntryPoint. Linkage names that
+  // aren't valid identifiers (e.g. the "spirv.llvm_fshl_i64" helpers of LLVM's
+  // SPIR-V back-end) can't be kept, and are sanitized below like OpNames.
   auto fix = [this](uint32_t id, const std::string &name) {
     if (!m_names.count(id)) {
       m_name_allocator.reserve(name);
@@ -684,25 +686,38 @@ void translator_impl::assign_names() {
   for (auto &ep : m_entry_points) {
     fix(ep.first, ep.second);
   }
-  for (auto &exp : m_exports) {
-    fix(exp.first, exp.second);
+  for (auto *linkage : {&m_exports, &m_imports}) {
+    for (auto &id_name : *linkage) {
+      if (name_allocator::is_identifier(id_name.second)) {
+        fix(id_name.first, id_name.second);
+      }
+    }
   }
-  for (auto &imp : m_imports) {
-    fix(imp.first, imp.second);
-  }
-  // Then the OpNames, before the made-up "v<id>" names so that those yield on
-  // a clash. Both in module order, for stable output.
+  // Then the remaining linkage names and the OpNames, before the made-up
+  // "v<id>" names so that those yield on a clash. Both in module order, for
+  // stable output.
+  auto hint_for = [this](uint32_t id) -> const std::string * {
+    for (auto *linkage : {&m_exports, &m_imports}) {
+      auto it = linkage->find(id);
+      if (it != linkage->end()) {
+        return &it->second;
+      }
+    }
+    auto it = m_debug_names.find(id);
+    return it != m_debug_names.end() && !it->second.empty() ? &it->second
+                                                            : nullptr;
+  };
   for (bool named : {true, false}) {
-    m_ir->module()->ForEachInst([this, named](const Instruction *inst) {
+    m_ir->module()->ForEachInst([this, named,
+                                 &hint_for](const Instruction *inst) {
       auto id = inst->result_id();
       if (id == 0 || m_names.count(id)) {
         return;
       }
-      auto it = m_debug_names.find(id);
-      bool has_name = it != m_debug_names.end() && !it->second.empty();
-      if (has_name == named) {
-        m_names[id] = m_name_allocator.allocate(
-            named ? it->second : "v" + std::to_string(id));
+      auto hint = hint_for(id);
+      if ((hint != nullptr) == named) {
+        m_names[id] =
+            m_name_allocator.allocate(named ? *hint : "v" + std::to_string(id));
       }
     });
   }

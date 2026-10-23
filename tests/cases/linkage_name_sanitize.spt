@@ -1,0 +1,44 @@
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+; Linkage names that aren't valid C identifiers, like the "spirv.llvm_fshl_i64"
+; helpers LLVM's SPIR-V back-end exports, can't be kept and must be sanitized,
+; without taking a valid linkage name that is kept verbatim.
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Linkage
+               OpCapability Int64
+               OpDecorate %helper LinkageAttributes "spirv.llvm_fshl_i64" Export
+               OpDecorate %other LinkageAttributes "spirv_llvm_fshl_i64" Export
+               OpMemoryModel Physical64 OpenCL
+               OpEntryPoint Kernel %k "k"
+       %void = OpTypeVoid
+      %ulong = OpTypeInt 64 0
+     %pulong = OpTypePointer CrossWorkgroup %ulong
+    %ulong_8 = OpConstant %ulong 8
+     %helpty = OpTypeFunction %ulong %ulong
+        %kty = OpTypeFunction %void %pulong
+     %helper = OpFunction %ulong None %helpty
+          %x = OpFunctionParameter %ulong
+         %hb = OpLabel
+          %y = OpShiftLeftLogical %ulong %x %ulong_8
+               OpReturnValue %y
+               OpFunctionEnd
+      %other = OpFunction %ulong None %helpty
+         %x2 = OpFunctionParameter %ulong
+         %ob = OpLabel
+         %y2 = OpShiftRightLogical %ulong %x2 %ulong_8
+               OpReturnValue %y2
+               OpFunctionEnd
+          %k = OpFunction %void None %kty
+          %p = OpFunctionParameter %pulong
+         %kb = OpLabel
+          %v = OpLoad %ulong %p
+          %r = OpFunctionCall %ulong %helper %v
+         %r2 = OpFunctionCall %ulong %other %r
+               OpStore %p %r2
+               OpReturn
+               OpFunctionEnd
+; CHECK: ulong spirv_llvm_fshl_i64_1(
+; CHECK: ulong spirv_llvm_fshl_i64(
+; CHECK: = spirv_llvm_fshl_i64_1(
+; CHECK: = spirv_llvm_fshl_i64(
