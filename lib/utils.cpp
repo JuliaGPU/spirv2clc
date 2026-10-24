@@ -374,9 +374,9 @@ std::unordered_set<std::string> gReservedIdentifiers = {
     "pipe",
 };
 
-std::string name_allocator::allocate(const std::string &hint) {
-  // Map anything that isn't a letter, digit or underscore to '_' (e.g. Julia
-  // names like "a::CLDeviceArray"), and avoid a leading digit.
+// Map anything that isn't a letter, digit or underscore to '_' (e.g. Julia
+// names like "a::CLDeviceArray"), and avoid a leading digit.
+static std::string sanitize_identifier(const std::string &hint) {
   std::string base = hint.empty() ? "v" : hint;
   for (auto &ch : base) {
     bool valid = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
@@ -388,6 +388,15 @@ std::string name_allocator::allocate(const std::string &hint) {
   if (base[0] >= '0' && base[0] <= '9') {
     base = "_" + base;
   }
+  return base;
+}
+
+bool name_allocator::is_identifier(const std::string &name) {
+  return sanitize_identifier(name) == name;
+}
+
+std::string name_allocator::allocate(const std::string &hint) {
+  auto base = sanitize_identifier(hint);
   auto name = base;
   for (unsigned n = 1; m_used.count(name) || gReservedIdentifiers.count(name);
        n++) {

@@ -60,6 +60,9 @@ public:
   // points, linkage names) that can't be changed.
   void reserve(const std::string &name) { m_used.insert(name); }
 
+  // Whether `name` is spelled like a C identifier.
+  static bool is_identifier(const std::string &name);
+
   // A fresh identifier based on `hint`.
   std::string allocate(const std::string &hint);
 
