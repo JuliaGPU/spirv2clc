@@ -1,0 +1,91 @@
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+; OpUMulExtended / OpSMulExtended (emitted for llvm.{u,s}mul.with.overflow) used
+; to hit UNIMPLEMENTED. They lower to a {low, high} struct built from the
+; wrapping product and mul_hi, whose signed overload needs signed operands.
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Linkage
+               OpCapability Int8
+               OpCapability Int16
+               OpCapability Int64
+               OpMemoryModel Physical64 OpenCL
+       %void = OpTypeVoid
+      %uchar = OpTypeInt 8 0
+     %ushort = OpTypeInt 16 0
+       %uint = OpTypeInt 32 0
+      %ulong = OpTypeInt 64 0
+    %ushort2 = OpTypeVector %ushort 2
+      %uint4 = OpTypeVector %uint 4
+        %st8 = OpTypeStruct %uchar %uchar
+       %st16 = OpTypeStruct %ushort %ushort
+       %st32 = OpTypeStruct %uint %uint
+       %st64 = OpTypeStruct %ulong %ulong
+      %st16v = OpTypeStruct %ushort2 %ushort2
+      %st32v = OpTypeStruct %uint4 %uint4
+         %p8 = OpTypePointer CrossWorkgroup %st8
+        %p16 = OpTypePointer CrossWorkgroup %st16
+        %p32 = OpTypePointer CrossWorkgroup %st32
+        %p64 = OpTypePointer CrossWorkgroup %st64
+       %p16v = OpTypePointer CrossWorkgroup %st16v
+       %p32v = OpTypePointer CrossWorkgroup %st32v
+       %fnty = OpTypeFunction %void %uchar %uchar %ushort %ushort %uint %uint %ulong %ulong %ushort2 %ushort2 %uint4 %uint4 %p8 %p16 %p32 %p64 %p16v %p32v
+         %fn = OpFunction %void None %fnty
+         %a8 = OpFunctionParameter %uchar
+         %b8 = OpFunctionParameter %uchar
+        %a16 = OpFunctionParameter %ushort
+        %b16 = OpFunctionParameter %ushort
+        %a32 = OpFunctionParameter %uint
+        %b32 = OpFunctionParameter %uint
+        %a64 = OpFunctionParameter %ulong
+        %b64 = OpFunctionParameter %ulong
+       %a16v = OpFunctionParameter %ushort2
+       %b16v = OpFunctionParameter %ushort2
+       %a32v = OpFunctionParameter %uint4
+       %b32v = OpFunctionParameter %uint4
+       %out8 = OpFunctionParameter %p8
+      %out16 = OpFunctionParameter %p16
+      %out32 = OpFunctionParameter %p32
+      %out64 = OpFunctionParameter %p64
+     %out16v = OpFunctionParameter %p16v
+     %out32v = OpFunctionParameter %p32v
+        %lbl = OpLabel
+         %u8 = OpUMulExtended %st8 %a8 %b8
+         %s8 = OpSMulExtended %st8 %a8 %b8
+        %u16 = OpUMulExtended %st16 %a16 %b16
+        %s16 = OpSMulExtended %st16 %a16 %b16
+        %u32 = OpUMulExtended %st32 %a32 %b32
+        %s32 = OpSMulExtended %st32 %a32 %b32
+        %u64 = OpUMulExtended %st64 %a64 %b64
+        %s64 = OpSMulExtended %st64 %a64 %b64
+       %u16v = OpUMulExtended %st16v %a16v %b16v
+       %s16v = OpSMulExtended %st16v %a16v %b16v
+       %u32v = OpUMulExtended %st32v %a32v %b32v
+       %s32v = OpSMulExtended %st32v %a32v %b32v
+               OpStore %out8 %u8
+               OpStore %out8 %s8
+               OpStore %out16 %u16
+               OpStore %out16 %s16
+               OpStore %out32 %u32
+               OpStore %out32 %s32
+               OpStore %out64 %u64
+               OpStore %out64 %s64
+               OpStore %out16v %u16v
+               OpStore %out16v %s16v
+               OpStore %out32v %u32v
+               OpStore %out32v %s32v
+               OpReturn
+               OpFunctionEnd
+; CHECK: {{^}}static void {{v[0-9]+}}(uchar [[A8:v[0-9]+]], uchar [[B8:v[0-9]+]], ushort [[A16:v[0-9]+]], ushort [[B16:v[0-9]+]], uint [[A32:v[0-9]+]], uint [[B32:v[0-9]+]], ulong [[A64:v[0-9]+]], ulong [[B64:v[0-9]+]], ushort2 [[A16V:v[0-9]+]], ushort2 [[B16V:v[0-9]+]], uint4 [[A32V:v[0-9]+]], uint4 [[B32V:v[0-9]+]],
+; CHECK: = {(uchar)((uint)[[A8]] * [[B8]]), mul_hi([[A8]], [[B8]])};
+; CHECK: = {(uchar)((uint)[[A8]] * [[B8]]), as_uchar(mul_hi(as_char([[A8]]), as_char([[B8]])))};
+; CHECK: = {(ushort)((uint)[[A16]] * [[B16]]), mul_hi([[A16]], [[B16]])};
+; CHECK: = {(ushort)((uint)[[A16]] * [[B16]]), as_ushort(mul_hi(as_short([[A16]]), as_short([[B16]])))};
+; CHECK: = {(uint)([[A32]] * [[B32]]), mul_hi([[A32]], [[B32]])};
+; CHECK: = {(uint)([[A32]] * [[B32]]), as_uint(mul_hi(as_int([[A32]]), as_int([[B32]])))};
+; CHECK: = {(ulong)([[A64]] * [[B64]]), mul_hi([[A64]], [[B64]])};
+; CHECK: = {(ulong)([[A64]] * [[B64]]), as_ulong(mul_hi(as_long([[A64]]), as_long([[B64]])))};
+; CHECK: = {(ushort2)([[A16V]] * [[B16V]]), mul_hi([[A16V]], [[B16V]])};
+; CHECK: = {(ushort2)([[A16V]] * [[B16V]]), as_ushort2(mul_hi(as_short2([[A16V]]), as_short2([[B16V]])))};
+; CHECK: = {(uint4)([[A32V]] * [[B32V]]), mul_hi([[A32V]], [[B32V]])};
+; CHECK: = {(uint4)([[A32V]] * [[B32V]]), as_uint4(mul_hi(as_int4([[A32V]]), as_int4([[B32V]])))};

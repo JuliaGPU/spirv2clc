@@ -567,6 +567,28 @@ bool translator_impl::translate_instruction(const Instruction &inst,
     }
     break;
   }
+  case spv::Op::OpUMulExtended:
+  case spv::Op::OpSMulExtended: {
+    // Result is a struct { low, high } of the full-width product. The low half
+    // is the same for both signednesses; the high half is mul_hi, whose signed
+    // overload needs signed operands. Narrow scalars promote to int, where a
+    // 16-bit product can overflow, so multiply those as uint and truncate
+    // (vector arithmetic does not promote).
+    auto a = inst.GetSingleWordOperand(2);
+    auto b = inst.GetSingleWordOperand(3);
+    auto mt = type_id_for(a);
+    auto ity = type_for(mt)->AsInteger();
+    auto lhs = value(a);
+    if (ity && ity->width() < 32) {
+      lhs = c::cast("uint", lhs);
+    }
+    auto lo = cast_to(mt, c::binary("*", lhs, value(b)));
+    auto hi = opcode == spv::Op::OpUMulExtended
+                  ? call_values("mul_hi", {a, b})
+                  : as_type(mt, call_signed("mul_hi", {a, b}));
+    val = c::init_list({lo, hi});
+    break;
+  }
   case spv::Op::OpPtrAccessChain:
   case spv::Op::OpInBoundsPtrAccessChain:
     if (!emit_access_chain(inst, /*ptr_variant=*/true, val)) {
