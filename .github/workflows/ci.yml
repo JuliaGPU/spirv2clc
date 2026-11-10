@@ -143,15 +143,18 @@ jobs:
       - name: Install dependencies
         run: sudo apt-get install -y ninja-build
 
-      # Build the translator the way Yggdrasil does for spirv2clc_jll: the tool only.
+      # Build the products spirv2clc_jll ships: the tool, and the C API library that
+      # OpenCL.jl calls to translate.
       - name: Build spirv2clc
         run: |
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DSPIRV2CLC_UPDATE_SUBMODULES=OFF \
             -DBUILD_TESTING=OFF
-          cmake --build build --target spirv2clc
-          cmake --install build --component tools --prefix "$RUNNER_TEMP/spirv2clc"
+          cmake --build build --target spirv2clc libspirv2clc-c
+          for component in tools c_api; do
+            cmake --install build --component $component --prefix "$RUNNER_TEMP/spirv2clc"
+          done
 
       - uses: actions/checkout@v7
         with:
@@ -162,8 +165,8 @@ jobs:
           version: '1'
       - uses: julia-actions/cache@v3
 
-      # Point spirv2clc_jll at the binary built above. It isn't a direct dependency of
-      # the test environment, so this also adds it to the `[extras]` there.
+      # Point spirv2clc_jll's products at the ones built above. It isn't a direct
+      # dependency of the test environment, so this also adds it to the `[extras]` there.
       - name: Use this spirv2clc
         working-directory: OpenCL.jl
         run: |
@@ -172,8 +175,10 @@ jobs:
             Pkg.instantiate()
             using Preferences, UUIDs
             set_preferences!((UUID("f0274c0c-8c8a-59f1-85b7-f7d60330c5fb"), "spirv2clc_jll"),
-                             "spirv2clc_path" => ARGS[1]; force=true)' \
-            "$RUNNER_TEMP/spirv2clc/bin/spirv2clc"
+                             "spirv2clc_path" => joinpath(ARGS[1], "bin", "spirv2clc"),
+                             "libspirv2clc_path" => joinpath(ARGS[1], "lib", "libspirv2clc.so");
+                             force=true)' \
+            "$RUNNER_TEMP/spirv2clc"
           cat test/LocalPreferences.toml
 
       # OpenCL.jl runs every PoCL test twice: `pocl/` through PoCL's SPIR-V support,
@@ -184,7 +189,9 @@ jobs:
         run: |
           julia --project=test --color=yes -e '
             using OpenCL
-            path = OpenCL.spirv2clc_jll.spirv2clc_path
-            startswith(path, ENV["RUNNER_TEMP"]) ||
-                error("spirv2clc_jll override not in effect, got ", path)'
+            jll = OpenCL.spirv2clc_jll
+            for path in (jll.spirv2clc_path, jll.libspirv2clc_path)
+                startswith(path, ENV["RUNNER_TEMP"]) ||
+                    error("spirv2clc_jll override not in effect, got ", path)
+            end'
           julia --project=test --color=yes test/runtests.jl --platform=pocl poclc
