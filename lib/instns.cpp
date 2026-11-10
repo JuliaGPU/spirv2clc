@@ -960,9 +960,17 @@ bool translator_impl::translate_instruction(const Instruction &inst,
   }
   case spv::Op::OpSDiv:
   case spv::Op::OpSRem:
-  case spv::Op::OpShiftRightArithmetic:
-    val = as_type(rtype, translate_binop_signed(inst));
+  case spv::Op::OpShiftRightArithmetic: {
+    // Narrow scalar operands promote to int, and as_<type> needs the result
+    // back at the operand width.
+    val = translate_binop_signed(inst);
+    auto ity = type_for(rtype)->AsInteger();
+    if (ity && ity->width() < 32) {
+      val = cast_to_signed(rtype, val);
+    }
+    val = as_type(rtype, val);
     break;
+  }
   case spv::Op::OpVectorTimesScalar:
   case spv::Op::OpShiftLeftLogical:
   case spv::Op::OpShiftRightLogical:
