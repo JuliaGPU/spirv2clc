@@ -1,0 +1,53 @@
+; RUN: %spirv2clc --asm %s | %clang -c -cl-std=CL1.2 -x cl - -o /dev/null
+; RUN: %spirv2clc --asm %s | %FileCheck %s
+; OpSDiv/OpSRem/OpShiftRightArithmetic on char and short promote their operands
+; to int, so the result has to be narrowed again before as_<type> reinterprets
+; it: as_ushort of an int is a size mismatch. Vectors don't promote.
+               OpCapability Kernel
+               OpCapability Addresses
+               OpCapability Linkage
+               OpCapability Int8
+               OpCapability Int16
+               OpMemoryModel Physical64 OpenCL
+       %void = OpTypeVoid
+      %uchar = OpTypeInt 8 0
+     %ushort = OpTypeInt 16 0
+    %ushort2 = OpTypeVector %ushort 2
+        %p8 = OpTypePointer CrossWorkgroup %uchar
+       %p16 = OpTypePointer CrossWorkgroup %ushort
+      %p16v = OpTypePointer CrossWorkgroup %ushort2
+       %fnty = OpTypeFunction %void %uchar %uchar %ushort %ushort %ushort2 %ushort2 %p8 %p16 %p16v
+         %fn = OpFunction %void None %fnty
+         %a8 = OpFunctionParameter %uchar
+         %b8 = OpFunctionParameter %uchar
+        %a16 = OpFunctionParameter %ushort
+        %b16 = OpFunctionParameter %ushort
+       %a16v = OpFunctionParameter %ushort2
+       %b16v = OpFunctionParameter %ushort2
+       %out8 = OpFunctionParameter %p8
+      %out16 = OpFunctionParameter %p16
+     %out16v = OpFunctionParameter %p16v
+        %lbl = OpLabel
+     %div8 = OpSDiv %uchar %a8 %b8
+     %rem8 = OpSRem %uchar %a8 %b8
+     %sar8 = OpShiftRightArithmetic %uchar %a8 %b8
+    %div16 = OpSDiv %ushort %a16 %b16
+    %rem16 = OpSRem %ushort %a16 %b16
+    %sar16 = OpShiftRightArithmetic %ushort %a16 %b16
+   %div16v = OpSDiv %ushort2 %a16v %b16v
+               OpStore %out8 %div8
+               OpStore %out8 %rem8
+               OpStore %out8 %sar8
+               OpStore %out16 %div16
+               OpStore %out16 %rem16
+               OpStore %out16 %sar16
+               OpStore %out16v %div16v
+               OpReturn
+               OpFunctionEnd
+; CHECK: as_uchar((char)(as_char([[A8:v[0-9]+]]) / as_char([[B8:v[0-9]+]])))
+; CHECK: as_uchar((char)(as_char([[A8]]) % as_char([[B8]])))
+; CHECK: as_uchar((char)(as_char([[A8]]) >> as_char([[B8]])))
+; CHECK: as_ushort((short)(as_short([[A16:v[0-9]+]]) / as_short([[B16:v[0-9]+]])))
+; CHECK: as_ushort((short)(as_short([[A16]]) % as_short([[B16]])))
+; CHECK: as_ushort((short)(as_short([[A16]]) >> as_short([[B16]])))
+; CHECK: as_ushort2(as_short2({{v[0-9]+}}) / as_short2({{v[0-9]+}}))
